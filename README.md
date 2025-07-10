@@ -56,4 +56,4 @@ The high-level architecture consists of 2 main components:
 
 ## License
 
-This software is licensed under the GPL3.0 license, see [LICENSE](LICENSE) for more information.
+This software is licensed under the GPLv3 license, see [LICENSE](LICENSE) for more information.
