@@ -1,6 +1,6 @@
 # AcousticsLab
 
-AcousticsLab is a cross-platform framework for sound and vibration analysis, with advanced algorithms for anomaly detection and audio classification integrated and optimized, we deliver a simple, universal, and robust acoustics analysis toolkit for MCUs and SBCs."
+AcousticsLab is a cross-platform framework for sound and vibration analysis, with advanced algorithms for anomaly detection and audio classification integrated and optimized, we deliver a simple, universal, and robust acoustics analysis toolkit for MCUs and SBCs.
 
 ## Getting Started
 
