@@ -51,8 +51,8 @@ This diagram shows a modular embedded AI architecture. It features a layered des
 <img src="https://cdn.jsdelivr.net/gh/Unbinilium/AcousticsLab@main/docs/images/architecture-overview.png" alt="Architecture Overview" width="100%"/>
 
 The high-level architecture consists of 2 main components:
-- [Acoustics](../components/acoustics): features the core functionality for sound and vibration analysis, including algorithms for anomaly detection and audio classification.
-- [Acoustics-Porting](../components/acoustics-porting): provides the hardware abstraction layer (HAL) for the Acoustics component, allowing it to run on different hardware platforms.
+- [Acoustics](https://github.com/Unbinilium/AcousticsLab/tree/main/components/acoustics): features the core functionality for sound and vibration analysis, including algorithms for anomaly detection and audio classification.
+- [Acoustics-Porting](https://github.com/Unbinilium/AcousticsLab/tree/main/components/acoustics-porting): provides the hardware abstraction layer (HAL) for the Acoustics component, allowing it to run on different hardware platforms.
 
 ## License
 
