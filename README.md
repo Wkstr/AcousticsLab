@@ -9,7 +9,7 @@ Please follow the instructions in [ESP-IDF - Get Started](https://docs.espressif
 1. Clone and setup the repository.
 
     ```sh
-    git clone https://github.com/Unbinilium/AcousticsLab.git --depth=1
+    git clone https://github.com/Seeed-Studio/AcousticsLab.git --depth=1
     cd AcousticsLab
     git submodule update --init
     ```
@@ -27,7 +27,7 @@ Please follow the instructions in [ESP-IDF - Get Started](https://docs.espressif
 
 AcousticsLab implements a user-friendly web interface to visualize audio/vibration data, control the device, and view results in real-time.
 
-<img src="https://cdn.jsdelivr.net/gh/Unbinilium/AcousticsLab@main/docs/images/console-preview.gif" alt="Console Preview" width="100%"/>
+<img src="https://github.com/Seeed-Studio/AcousticsLab/blob/main/docs/images/console-preview.gif?raw=true" alt="Console Preview" width="100%"/>
 
 1. Install the required python dependencies.
 
@@ -48,11 +48,11 @@ AcousticsLab implements a user-friendly web interface to visualize audio/vibrati
 
 This diagram shows a modular embedded AI architecture. It features a layered design with a Hardware Abstraction Layer (HAL), a Core Library (with DSP/ML), an API, and an Application layer. The architecture is designed to simplify development and integrate easily with platforms like Arduino and MicroPython.
 
-<img src="https://cdn.jsdelivr.net/gh/Unbinilium/AcousticsLab@main/docs/images/architecture-overview.png" alt="Architecture Overview" width="100%"/>
+<img src="https://github.com/Seeed-Studio/AcousticsLab/blob/main/docs/images/architecture-overview.png?raw=true" alt="Architecture Overview" width="100%"/>
 
 The high-level architecture consists of 2 main components:
-- [Acoustics](https://github.com/Unbinilium/AcousticsLab/tree/main/components/acoustics): features the core functionality for sound and vibration analysis, including algorithms for anomaly detection and audio classification.
-- [Acoustics-Porting](https://github.com/Unbinilium/AcousticsLab/tree/main/components/acoustics-porting): provides the hardware abstraction layer (HAL) for the Acoustics component, allowing it to run on different hardware platforms.
+- [Acoustics](https://github.com/Seeed-Studio/AcousticsLab/tree/main/components/acoustics): features the core functionality for sound and vibration analysis, including algorithms for anomaly detection and audio classification.
+- [Acoustics-Porting](https://github.com/Seeed-Studio/AcousticsLab/tree/main/components/acoustics-porting): provides the hardware abstraction layer (HAL) for the Acoustics component, allowing it to run on different hardware platforms.
 
 ## License
 
