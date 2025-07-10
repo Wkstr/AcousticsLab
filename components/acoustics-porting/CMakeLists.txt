@@ -1,0 +1,74 @@
+cmake_minimum_required(VERSION 3.12.4)
+
+message(STATUS "Configuring AcousticsLab Porting SDK")
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+set(ACOUSTIC_SDK_VERSION_MAJOR 1)
+set(ACOUSTIC_SDK_VERSION_MINOR 7)
+set(ACOUSTIC_SDK_VERSION_PATCH 10)
+
+set(ACOUSTICS_PORTING_INCLUDES_DIR
+    ${CMAKE_CURRENT_LIST_DIR}/porting
+)
+message(STATUS "Include directory: ${ACOUSTICS_PORTING_INCLUDES_DIR}")
+
+
+file(GLOB_RECURSE ACOUSTICS_PORTING_SRCS
+    ${CMAKE_CURRENT_LIST_DIR}/porting/*.h
+    ${CMAKE_CURRENT_LIST_DIR}/porting/*.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/porting/*.cpp
+)
+message(STATUS "ACOUSTICS_PORTING_SRCS: ${ACOUSTICS_PORTING_SRCS}")
+
+set_property(GLOBAL PROPERTY ACOUSTIC_SDK_TARGET "POSIX")
+
+
+set(ACOUSTIC_INCLUDES_DIR
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/
+)
+
+file(GLOB_RECURSE ACOUSTIC_SRCS_API
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/api/*.c
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/api/*.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/api/*.cpp
+)
+
+file(GLOB_RECURSE ACOUSTIC_SRCS_CORE
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/core/*.c
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/core/*.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/core/*.cpp
+)
+
+file(GLOB_RECURSE ACOUSTIC_SRCS_HAL
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/hal/*.c
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/hal/*.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/hal/*.cpp
+)
+
+set(ACOUSTIC_SRCS
+    ${ACOUSTIC_SRCS_API}
+    ${ACOUSTIC_SRCS_CORE}
+    ${ACOUSTIC_SRCS_HAL}
+)
+
+list(APPEND ACOUSTICS_PORTING_SRCS ${ACOUSTIC_SRCS})
+list(APPEND ACOUSTICS_PORTING_INCLUDES_DIR ${ACOUSTIC_INCLUDES_DIR})
+
+
+idf_component_register(
+    SRCS ${ACOUSTICS_PORTING_SRCS}
+    INCLUDE_DIRS ${ACOUSTICS_PORTING_INCLUDES_DIR}
+    REQUIRES freertos esp_psram
+    PRIV_REQUIRES esp_timer driver spi_flash esp_partition efuse lis3dhtr littlefs
+)
+
+add_compile_options(-fdiagnostics-color=always -ffast-math -O2)
+
+target_compile_definitions(${COMPONENT_LIB} PUBLIC
+    CORE_VERSION_MAJOR=${ACOUSTIC_SDK_VERSION_MAJOR}
+    CORE_VERSION_MINOR=${ACOUSTIC_SDK_VERSION_MINOR}
+    CORE_VERSION_PATCH=${ACOUSTIC_SDK_VERSION_PATCH}
+)

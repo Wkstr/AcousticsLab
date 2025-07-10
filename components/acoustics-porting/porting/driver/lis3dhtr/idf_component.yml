@@ -1,0 +1,5 @@
+version: "1.2.4"
+description: LIS3DHTR driver for Espressif Chipsets
+
+dependencies:
+  idf: ">=5.1.0"

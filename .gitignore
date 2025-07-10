@@ -1,0 +1,33 @@
+# macOS
+.DS_Store
+
+# VSCode
+.vscode
+
+# IDF
+examples/**/build
+examples/**/sdkconfig
+examples/**/sdkconfig.old
+examples/**/dependencies.lock
+examples/**/**.lock
+
+# Binary files
+**.bin
+**.elf
+**.map
+**.a
+**.lib
+**.hex
+**.o
+**.d
+**.dSYM
+
+# Doxygen
+docs/html
+docs/latex
+docs/perlmod
+
+# Python
+__pycache__
+*.pyc
+.venv

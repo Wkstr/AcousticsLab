@@ -1,0 +1,5 @@
+version: "2.11.0"
+description: LittleFS and BD driver for Espressif Chipsets
+
+dependencies:
+  idf: ">=5.1.0"

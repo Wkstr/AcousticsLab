@@ -1,0 +1,12 @@
+version: "1.0.0"
+description: AcousticsLab Porting Layer
+
+dependencies:
+  idf:
+    version: ">=5.4.0"
+  lis3dhtr:
+    version: ">=1.2.4"
+    path: porting/driver/lis3dhtr
+  littlefs:
+    version: ">=2.11.0"
+    path: porting/driver/littlefs
