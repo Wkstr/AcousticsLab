@@ -21,11 +21,11 @@ class RingBuffer final
 {
 public:
     template<typename P = std::unique_ptr<RingBuffer<T>>>
-    static P create(size_t capacity, void *buffer = nullptr, size_t size = 0)
+    static P create(size_t max_capacity, void *buffer = nullptr, size_t size = 0)
     {
-        if (capacity < 16)
+        if (max_capacity < 32)
         {
-            LOG(ERROR, "RingBuffer capacity must be at least 16");
+            LOG(ERROR, "RingBuffer max capacity must be at least 32");
             return nullptr;
         }
 
@@ -35,14 +35,19 @@ public:
             return nullptr;
         }
 
-        if (capacity > std::numeric_limits<size_t>::max() / sizeof(T) - 1)
+        if (max_capacity >= std::numeric_limits<size_t>::max() / sizeof(T))
         {
-            LOG(ERROR, "RingBuffer capacity is too large");
+            LOG(ERROR, "RingBuffer max capacity is too large");
             return nullptr;
         }
 
-        capacity += 1;
-        const size_t bytes_needed = capacity * sizeof(T);
+        if (max_capacity % 32 != 0)
+        {
+            LOG(ERROR, "RingBuffer max capacity must be a multiple of 32");
+            return nullptr;
+        }
+
+        const size_t bytes_needed = max_capacity * sizeof(T);
         if (size && size < bytes_needed)
         {
             LOG(ERROR, "Provided size (%zu) is less than required size (%zu)", size, bytes_needed);
@@ -61,7 +66,7 @@ public:
             internal_buffer = true;
         }
 
-        P ptr(new (std::nothrow) RingBuffer<T>(internal_buffer, buffer, capacity));
+        P ptr(new (std::nothrow) RingBuffer<T>(internal_buffer, buffer, max_capacity));
         if (!ptr)
         {
             LOG(ERROR, "Failed to create RingBuffer, size: %zu bytes", bytes_needed);
@@ -98,12 +103,12 @@ public:
         {
             return head - tail;
         }
-        return _capacity - (tail - head);
+        return _max_capacity - (tail - head);
     }
 
     inline size_t capacity() const noexcept
     {
-        return _capacity - 1;
+        return _capacity_mask;
     }
 
     inline bool empty() const noexcept
@@ -123,14 +128,14 @@ public:
         size_t head = _head.load(std::memory_order_relaxed);
         size_t tail = _tail.load(std::memory_order_acquire);
 
-        const size_t next_head = (head + 1) % _capacity;
+        const size_t next_head = (head + 1) & _capacity_mask;
         size_t next_tail = tail;
         const bool overflow = next_head == tail;
 
         T *ptr = _buffer + head;
         if (overflow) [[unlikely]]
         {
-            next_tail = (tail + 1) % _capacity;
+            next_tail = (tail + 1) & _capacity_mask;
 
             while (1)
             {
@@ -180,7 +185,7 @@ public:
 
         _lock.store(nullptr, std::memory_order_release);
 
-        const size_t next_tail = (tail + 1) % _capacity;
+        const size_t next_tail = (tail + 1) & _capacity_mask;
         _tail.compare_exchange_strong(tail, next_tail, std::memory_order_release, std::memory_order_relaxed);
 
         _pos = 0;
@@ -222,7 +227,7 @@ public:
         }
         size_t written = safe_count;
 
-        const size_t next_head = (head + safe_count) % _capacity;
+        const size_t next_head = (head + safe_count) & _capacity_mask;
         _head.compare_exchange_strong(head, next_head, std::memory_order_release, std::memory_order_relaxed);
 
         while (written < count)
@@ -265,7 +270,7 @@ public:
 
                 _lock.store(nullptr, std::memory_order_release);
 
-                next_tail = (next_tail + 1) % _capacity;
+                next_tail = (next_tail + 1) & _capacity_mask;
             }
         }
         else
@@ -273,7 +278,7 @@ public:
             while (head != next_tail && copied < count)
             {
                 ++copied;
-                next_tail = (next_tail + 1) % _capacity;
+                next_tail = (next_tail + 1) & _capacity_mask;
             }
         }
 
@@ -284,7 +289,7 @@ public:
             {
                 break;
             }
-            expected = ++tail % _capacity;
+            expected = ++tail & _capacity_mask;
         }
 
         _pos = 0;
@@ -313,13 +318,13 @@ public:
     {
         const size_t head = _head.load(std::memory_order_acquire);
         const size_t tail = _tail.load(std::memory_order_relaxed);
-        const size_t size = head >= tail ? head - tail : _capacity - tail + head;
+        const size_t size = head >= tail ? head - tail : _max_capacity - tail + head;
         if (_pos >= size) [[unlikely]]
         {
             return false;
         }
 
-        const size_t pos = (tail + _pos++) % _capacity;
+        const size_t pos = (tail + _pos++) & _capacity_mask;
         T *ptr = _buffer + pos;
 
         void *expected_lock = nullptr;
@@ -347,9 +352,9 @@ public:
     }
 
 protected:
-    RingBuffer(bool internal_buffer, void *buffer, size_t capacity)
-        : _internal_buffer(internal_buffer), _buffer(static_cast<T *>(buffer)), _capacity(capacity), _head(0), _tail(0),
-          _lock(nullptr), _pos(0)
+    RingBuffer(bool internal_buffer, void *buffer, size_t max_capacity)
+        : _internal_buffer(internal_buffer), _buffer(static_cast<T *>(buffer)), _max_capacity(max_capacity),
+          _capacity_mask(_max_capacity - 1), _head(0), _tail(0), _lock(nullptr), _pos(0)
     {
 #ifdef __cpp_lib_atomic_is_always_lock_free
         if (!_head.is_always_lock_free || !_tail.is_always_lock_free)
@@ -367,7 +372,8 @@ protected:
 private:
     const bool _internal_buffer;
     T *_buffer;
-    const size_t _capacity;
+    const size_t _max_capacity;
+    const size_t _capacity_mask;
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Winterference-size"
     alignas(std::hardware_destructive_interference_size) std::atomic<size_t> _head;
