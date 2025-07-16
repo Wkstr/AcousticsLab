@@ -14,6 +14,13 @@
 #include <new>
 #include <type_traits>
 
+#ifdef ESP_PLATFORM
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#else
+#include <thread>
+#endif
+
 namespace core {
 
 template<typename T,

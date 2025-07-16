@@ -31,3 +31,7 @@ docs/perlmod
 __pycache__
 *.pyc
 .venv
+
+# Custom
+.log
+.issues

@@ -817,7 +817,7 @@ protected:
         _buffer = _buffer_s;
     }
 
-    inline constexpr void flush() noexcept
+    inline void flush() noexcept
     {
         if (_buffer > _buffer_s) [[likely]]
         {

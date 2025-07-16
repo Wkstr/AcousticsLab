@@ -27,7 +27,7 @@ namespace core {
 class Status final
 {
 public:
-    static inline constexpr Status OK() noexcept
+    static inline Status OK() noexcept
     {
         return Status(0);
     }

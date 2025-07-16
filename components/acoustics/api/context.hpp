@@ -3,6 +3,8 @@
 #define CONTEXT_HPP
 
 #include "hal/device.hpp"
+#include "hal/engine.hpp"
+#include "hal/processor.hpp"
 #include "hal/sensor.hpp"
 #include "hal/transport.hpp"
 
@@ -92,6 +94,10 @@ private:
         }
 
         bridge::__REGISTER_SENSORS__();
+
+        bridge::__REGISTER_PROCESSORS__();
+
+        bridge::__REGISTER_ENGINES__();
 
         bridge::__REGISTER_TRANSPORTS__();
         {
