@@ -84,7 +84,7 @@ idf_component_register(
     SRCS ${ACOUSTICS_PORTING_SRCS}
     INCLUDE_DIRS ${ACOUSTICS_PORTING_INCLUDES_DIR}
     REQUIRES freertos esp_psram espressif__esp-tflite-micro
-    PRIV_REQUIRES esp_timer driver spi_flash esp_partition efuse lis3dhtr littlefs microphone
+    PRIV_REQUIRES esp_timer driver spi_flash esp_partition efuse lis3dhtr littlefs
 )
 
 # Set KissFFT sources to be compiled as C (after component registration)
