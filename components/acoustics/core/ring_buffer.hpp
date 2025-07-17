@@ -24,57 +24,57 @@ public:
     template<typename P = std::unique_ptr<RingBuffer<T>>>
     [[nodiscard]] static P create(size_t max_capacity, T *buffer = nullptr, size_t size = 0) noexcept
     {
-        if (max_capacity < 4)
+        if (max_capacity < 4) [[unlikely]]
         {
             LOG(ERROR, "RingBuffer max capacity must be at least 4");
-            return nullptr;
+            return {};
         }
 
-        if (size && !buffer)
+        if (size && !buffer) [[unlikely]]
         {
             LOG(ERROR, "Buffer cannot be null if size is provided");
-            return nullptr;
+            return {};
         }
 
-        if (max_capacity >= std::numeric_limits<size_t>::max() / sizeof(T))
+        if (max_capacity >= std::numeric_limits<size_t>::max() / sizeof(T)) [[unlikely]]
         {
             LOG(ERROR, "RingBuffer max capacity is too large");
-            return nullptr;
+            return {};
         }
 
-        if (max_capacity % 2 != 0)
+        if (max_capacity % 2 != 0) [[unlikely]]
         {
             LOG(ERROR, "RingBuffer max capacity must be a multiple of 2");
-            return nullptr;
+            return {};
         }
 
-        if (size && size < max_capacity * sizeof(T))
+        if (buffer && size < max_capacity * sizeof(T)) [[unlikely]]
         {
             LOG(ERROR, "Provided size (%zu) is less than required size (%zu)", size, max_capacity * sizeof(T));
-            return nullptr;
+            return {};
         }
 
         bool internal_buffer = false;
         if (!buffer)
         {
             buffer = new (std::nothrow) T[max_capacity] {};
-            if (!buffer)
+            if (!buffer) [[unlikely]]
             {
                 LOG(ERROR, "Failed to allocate memory for RingBuffer, size: %zu bytes", max_capacity * sizeof(T));
-                return nullptr;
+                return {};
             }
             internal_buffer = true;
         }
 
         P ptr(new (std::nothrow) RingBuffer<T>(internal_buffer, buffer, max_capacity));
-        if (!ptr)
+        if (!ptr) [[unlikely]]
         {
             LOG(ERROR, "Failed to create RingBuffer, size: %zu bytes", sizeof(RingBuffer<T>));
             if (internal_buffer)
             {
                 delete[] buffer;
             }
-            return nullptr;
+            return {};
         }
 
         return ptr;

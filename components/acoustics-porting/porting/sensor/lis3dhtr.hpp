@@ -277,7 +277,8 @@ public:
         return available;
     }
 
-    inline core::Status readDataFrame(core::DataFrame<core::Tensor> &data_frame, size_t batch_size) override
+    inline core::Status readDataFrame(core::DataFrame<std::shared_ptr<core::Tensor>> &data_frame,
+        size_t batch_size) override
     {
         const std::lock_guard<std::mutex> lock(_lock);
 
@@ -323,12 +324,6 @@ public:
             return STATUS(EOVERFLOW, "Batch size exceeds data buffer capacity");
         }
 
-        if (_data_buffer.use_count() > 1) [[unlikely]]
-        {
-            LOG(ERROR, "Data buffer ownership conflict: use_count=%lu", _data_buffer.use_count());
-            return STATUS(EBUSY, "Data buffer ownership conflict");
-        }
-
         _info.status = Status::Locked;
 
         const size_t n_elems_to_discard = _buffer->size() - batch_size;
@@ -337,12 +332,13 @@ public:
             const auto discarded = _buffer->read(nullptr, n_elems_to_discard);
             LOG(DEBUG, "Discarded %zu staled elements from buffer", discarded);
         }
+        batch_size = _buffer->read(reinterpret_cast<Data *>(_data_buffer.get()), batch_size);
 
         data_frame.timestamp = std::chrono::steady_clock::now();
         data_frame.index = _frame_index;
-        _buffer->read(reinterpret_cast<Data *>(_data_buffer.get()), batch_size);
-        data_frame.data = core::Tensor(core::Tensor::Type::Float32, { batch_size, 3 }, _data_buffer,
-            _data_buffer_capacity * sizeof(Data));
+        data_frame.data = core::Tensor::create(core::Tensor::Type::Float32, core::Tensor::Shape(batch_size, 3),
+            reinterpret_cast<void *>(_data_buffer.get()), _data_buffer_capacity * sizeof(Data));
+
         _frame_index += batch_size;
 
         _info.status = Status::Idle;

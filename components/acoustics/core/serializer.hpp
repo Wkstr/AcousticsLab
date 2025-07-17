@@ -667,7 +667,7 @@ public:
         {
             LOG(ERROR, "Buffer size is smaller than %zu bytes (%zu), cannot create serializer", const_buffer_size_min,
                 size);
-            return nullptr;
+            return {};
         }
 
         bool internal_buffer = false;
@@ -677,7 +677,7 @@ public:
             if (!buffer) [[unlikely]]
             {
                 LOG(ERROR, "Failed to allocate buffer of size %zu", size);
-                return nullptr;
+                return {};
             }
             internal_buffer = true;
         }
@@ -691,7 +691,7 @@ public:
             {
                 delete[] static_cast<unsigned char *>(buffer);
             }
-            return nullptr;
+            return {};
         }
 
         return ptr;

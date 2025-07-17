@@ -95,24 +95,30 @@ public:
                     std::chrono::steady_clock::now());
             }
 
-            const size_t available = _sensor->dataAvailable();
+            size_t available = _sensor->dataAvailable();
             if (available < 1)
             {
                 return executor.submit(getptr(), getNextDataDelay(available));
             }
 
             {
-                core::DataFrame<core::Tensor> data_frame;
+                core::DataFrame<std::shared_ptr<core::Tensor>> data_frame;
                 auto status = _sensor->readDataFrame(data_frame, available);
                 if (!status) [[unlikely]]
                 {
                     return replyWithStatus(status, std::chrono::steady_clock::now());
                 }
-                const auto shape = data_frame.data.shape();
-                if (shape[0] != available || data_frame.data.dtype() != core::Tensor::Type::Float32) [[unlikely]]
+                if (!data_frame.data) [[unlikely]]
+                {
+                    LOG(ERROR, "Data frame is null");
+                    return replyWithStatus(STATUS(EFAULT, "Data frame is null"), std::chrono::steady_clock::now());
+                }
+                const auto &shape = data_frame.data->shape();
+                available = shape[0];
+                if (available < 1 || data_frame.data->dtype() != core::Tensor::Type::Float32) [[unlikely]]
                 {
                     LOG(ERROR, "Data frame shape or type mismatch: Shape=(%zu,%zu), DType=%d", shape[0], shape[1],
-                        static_cast<int>(data_frame.data.dtype()));
+                        static_cast<int>(data_frame.data->dtype()));
                     return replyWithStatus(STATUS(EINVAL, "Data frame shape or type mismatch"),
                         std::chrono::steady_clock::now());
                 }
@@ -133,7 +139,7 @@ public:
                     }
                     for (size_t i = 0, h = head; i < size; i += axes, ++h)
                     {
-                        const auto data_i = &data_frame.data.dataAs<float>()[i];
+                        const auto data_i = &data_frame.data->dataAs<float>()[i];
                         const auto index = h & v0::shared::buffer_size_mask;
                         for (size_t j = 0; j < buffer_axes; ++j)
                         {

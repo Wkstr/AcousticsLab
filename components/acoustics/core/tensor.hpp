@@ -5,18 +5,15 @@
 #include "logger.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <cstdint>
-#include <initializer_list>
-#include <memory_resource>
+#include <memory>
 #include <numeric>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace core {
-
-static constexpr size_t TENSOR_SHAPE_MAX_DIMENSIONS = 4;
 
 class Tensor final
 {
@@ -38,55 +35,59 @@ public:
     class Shape final
     {
     public:
-        Shape(std::initializer_list<size_t> dimensions) : _dimensions { 0 }, _size(0)
+        template<typename... Args,
+            std::enable_if_t<(std::is_integral_v<std::remove_cvref_t<Args> > && ...), bool> = true>
+        Shape(Args &&...dims) noexcept
+            : _dims({ static_cast<size_t>(std::forward<Args>(dims))... }), _size(sizeof...(Args)),
+              _dot((static_cast<size_t>(std::forward<Args>(dims)) * ...))
         {
-            if (dimensions.size() > TENSOR_SHAPE_MAX_DIMENSIONS)
-            {
-                LOG(ERROR, "Too many dimensions: %zu > %zu", dimensions.size(), TENSOR_SHAPE_MAX_DIMENSIONS);
-                return;
-            }
-
-            _size = dimensions.size();
-            for (size_t i = 0; i < _size; ++i)
-            {
-                const size_t dim = *std::next(dimensions.begin(), i);
-                if (dim == 0)
-                {
-                    LOG(ERROR, "Dimension cannot be zero: %zu", dim);
-                    return;
-                }
-                _dimensions[i] = dim;
-            }
+            _dims.shrink_to_fit();
         }
 
-        inline size_t size() const
+        explicit Shape(const std::vector<size_t> &dims) noexcept
+            : _dims(dims), _size(dims.size()), _dot(std::accumulate(dims.begin(), dims.end(), 1, std::multiplies<>()))
+        {
+            _dims.shrink_to_fit();
+        }
+
+        explicit Shape(std::vector<size_t> &&dims) noexcept
+            : _dims(std::move(dims)), _size(_dims.size()),
+              _dot(std::accumulate(_dims.begin(), _dims.end(), 1, std::multiplies<>()))
+        {
+            _dims.shrink_to_fit();
+        }
+
+        ~Shape() = default;
+
+        inline size_t size() const noexcept
         {
             return _size;
         }
 
-        inline size_t operator[](size_t index) const
+        inline size_t operator[](size_t index) const noexcept
         {
-            if (index >= _size)
+            if (index >= _size) [[unlikely]]
             {
-                LOG(ERROR, "Index out of bounds: %zu >= %zu", index, _size);
                 return 0;
             }
-            return _dimensions[index];
+            return _dims[index];
         }
 
-        inline size_t dot() const
+        inline size_t dot() const noexcept
         {
-            return std::accumulate(_dimensions.begin(), _dimensions.begin() + _size, 1, std::multiplies<size_t>());
+            return _dot;
         }
 
     private:
-        std::array<size_t, TENSOR_SHAPE_MAX_DIMENSIONS> _dimensions;
+        std::vector<size_t> _dims;
         size_t _size;
+        size_t _dot;
     };
 
     struct QuantParams final
     {
-        QuantParams(float scale = 1.0f, int32_t zero_point = 0) : scale(scale), zero_point(zero_point)
+        explicit QuantParams(float scale = 1.0f, int zero_point = 0) noexcept
+            : scale(scale), zero_point(static_cast<int32_t>(zero_point))
         {
             if (std::isnan(scale) || std::isinf(scale) || scale <= std::numeric_limits<float>::epsilon()) [[unlikely]]
             {
@@ -100,148 +101,162 @@ public:
         const int32_t zero_point;
     };
 
-    Tensor(Type dtype, std::initializer_list<size_t> shape, std::shared_ptr<std::byte[]> data = nullptr,
-        size_t data_size = 0) noexcept
-        : _dtype(dtype), _elem_bytes(static_cast<size_t>((static_cast<uint16_t>(_dtype) >> 8))), _shape(shape),
-          _data(std::move(data)), _data_size(data_size)
+    template<typename T = std::shared_ptr<Tensor>, typename P>
+    [[nodiscard]] static T create(Type dtype, P &&shape, void *data = nullptr, size_t size = 0) noexcept
     {
-        if (_elem_bytes == 0)
+        if (dtype == Type::Unknown) [[unlikely]]
         {
-            LOG(ERROR, "Unknown data type: %d", static_cast<int>(_dtype));
-            return;
+            LOG(ERROR, "Tensor data type is unknown");
+            return {};
+        }
+        const size_t dsize = static_cast<size_t>((static_cast<uint16_t>(dtype) >> 8));
+        if (dsize == 0) [[unlikely]]
+        {
+            LOG(ERROR, "Data type size is zero for dtype: %d", static_cast<int>(dtype));
+            return {};
         }
 
-        if (_shape.size() == 0)
+        if (shape.size() == 0) [[unlikely]]
         {
-            LOG(ERROR, "Shape cannot be empty");
-            return;
+            LOG(ERROR, "Tensor shape cannot be empty");
+            return {};
+        }
+        if (shape.dot() == 0) [[unlikely]]
+        {
+            LOG(ERROR, "Tensor shape cannot have zero elements");
+            return {};
         }
 
-        _data_size = _elem_bytes * _shape.dot();
-
-        if (_data == nullptr)
+        if (size && !data) [[unlikely]]
         {
-            _data = std::make_unique<std::byte[]>(_data_size);
-            if (_data == nullptr)
+            LOG(ERROR, "Data cannot be null if size is provided");
+            return {};
+        }
+
+        const size_t bytes_required = dsize * shape.dot();
+        if (data && size < bytes_required) [[unlikely]]
+        {
+            LOG(ERROR, "Data buffer size is too small: %zu bytes required, %zu bytes provided", bytes_required, size);
+            return {};
+        }
+
+        bool internal_data = false;
+        if (!data)
+        {
+            data = new (std::nothrow) std::byte[bytes_required];
+            if (!data) [[unlikely]]
             {
-                LOG(ERROR, "Failed to allocate memory for tensor data");
-                return;
+                LOG(ERROR, "Failed to allocate memory for tensor data, size: %zu bytes", bytes_required);
+                return {};
             }
-            LOG(INFO, "Allocated %zu bytes for tensor data at %p", _data_size, _data.get());
-            std::fill_n(_data.get(), _data_size, std::byte(0));
+            internal_data = true;
         }
 
-        if (_data_size > data_size)
+        T ptr(new (std::nothrow) Tensor(dtype, dsize, std::forward<P>(shape), internal_data,
+            static_cast<std::byte *>(data), bytes_required));
+        if (!ptr) [[unlikely]]
         {
-            LOG(ERROR, "Data buffer size is too small: %zu bytes required, %zu bytes provided", _data_size, data_size);
-            return;
+            LOG(ERROR, "Failed to create Tensor, size: %zu bytes", sizeof(Tensor));
+            if (internal_data)
+            {
+                delete[] static_cast<std::byte *>(data);
+            }
+            return {};
         }
+
+        return ptr;
     }
 
-    Tensor(const Tensor &other) = delete;
-
-    Tensor(Tensor &&other) noexcept
-        : _dtype(other._dtype), _elem_bytes(other._elem_bytes), _shape(std::move(other._shape)),
-          _data(std::move(other._data)), _data_size(other._data_size)
+    ~Tensor() noexcept
     {
-        other._dtype = Type::Unknown;
-        other._elem_bytes = 0;
-        other._shape = Shape({});
-        other._data.reset();
-        other._data_size = 0;
-    }
-
-    Tensor() noexcept : _dtype(Type::Unknown), _elem_bytes(0), _shape({}), _data(nullptr), _data_size(0) { }
-
-    ~Tensor() = default;
-
-    Tensor &operator=(const Tensor &other) = delete;
-
-    Tensor &operator=(Tensor &&other) noexcept
-    {
-        if (this != &other)
+        if (_internal_data && _data)
         {
-            _dtype = other._dtype;
-            _elem_bytes = other._elem_bytes;
-            _shape = std::move(other._shape);
-            _data = std::move(other._data);
-            _data_size = other._data_size;
+            delete[] _data;
         }
-        return *this;
+        _data = nullptr;
     }
 
-    inline Type dtype() const
+    inline Type dtype() const noexcept
     {
         return _dtype;
     }
 
-    inline const Shape &shape() const
+    inline size_t dsize() const noexcept
+    {
+        return _dsize;
+    }
+
+    inline const Shape &shape() const noexcept
     {
         return _shape;
     }
 
-    inline size_t dataSize() const
+    inline const std::byte *data() const noexcept
     {
-        return _data_size;
+        return _data;
     }
 
-    inline const std::byte *data() const
+    template<typename T, std::enable_if_t<std::is_trivially_copyable_v<T>, bool> = true>
+    inline T *dataAs() noexcept
     {
-        return _data.get();
-    }
-
-    template<typename T>
-    inline T *dataAs()
-    {
-        static_assert(std::is_trivially_copyable_v<T>, "T must be trivially copyable");
-        if (sizeof(T) != _elem_bytes) [[unlikely]]
+        if (sizeof(T) != _dsize) [[unlikely]]
         {
             LOG(ERROR, "Data type mismatch: expected %zu bytes, got %zu bytes", sizeof(T),
                 static_cast<size_t>((static_cast<uint16_t>(_dtype) >> 8)));
             return nullptr;
         }
-        return reinterpret_cast<T *>(_data.get());
+        return reinterpret_cast<T *>(_data);
     }
 
-    template<typename T>
-    inline const T *dataAs() const
+    template<typename T, std::enable_if_t<std::is_trivially_copyable_v<T>, bool> = true>
+    inline const T *dataAs() const noexcept
     {
-        return reinterpret_cast<const T *>(_data.get());
+        return reinterpret_cast<const T *>(_data);
     }
 
-    template<typename T>
-    inline T operator[](size_t index) const
+    template<typename T, std::enable_if_t<std::is_trivially_copyable_v<T>, bool> = true>
+    inline T operator[](size_t index) const noexcept
     {
-        return reinterpret_cast<const T *>(_data.get())[index];
+        return reinterpret_cast<const T *>(_data)[index];
     }
 
-    bool reshape(std::initializer_list<size_t> new_shape)
+    template<typename... Args>
+    bool reshape(Args &&...dims) noexcept
     {
-        Shape new_shape_obj(new_shape);
-        if (new_shape_obj.size() == 0 || new_shape_obj.dot() == 0)
+        Shape new_shape(std::forward<Args>(dims)...);
+        if (new_shape.size() == 0 || new_shape.dot() == 0) [[unlikely]]
         {
-            LOG(ERROR, "Invalid shape for reshaping");
+            LOG(ERROR, "Invalid shape for reshaping, size: %zu, dot: %zu", new_shape.size(), new_shape.dot());
             return false;
         }
 
-        const size_t new_size = new_shape_obj.dot() * _elem_bytes;
-        if (new_size != _data_size)
+        if (new_shape.dot() != _shape.dot()) [[unlikely]]
         {
-            LOG(ERROR, "Reshape size mismatch: %zu bytes expected, %zu bytes available", new_size, _data_size);
+            LOG(ERROR, "Reshape size mismatch: %zu elements expected, %zu elements available", new_shape.dot(),
+                _shape.dot());
             return false;
         }
 
-        _shape = std::move(new_shape_obj);
+        _shape = std::move(new_shape);
 
         return true;
     }
 
+protected:
+    template<typename T>
+    explicit Tensor(Type dtype, size_t dsize, T &&shape, bool internal_data, std::byte *data, size_t size) noexcept
+        : _dtype(dtype), _dsize(dsize), _shape(std::forward<T>(shape)), _internal_data(internal_data), _data(data),
+          _size(size)
+    {
+    }
+
 private:
-    Type _dtype;
-    size_t _elem_bytes;
+    const Type _dtype;
+    const size_t _dsize;
     Shape _shape;
-    std::shared_ptr<std::byte[]> _data;
-    size_t _data_size;
+    const bool _internal_data;
+    std::byte *_data;
+    const size_t _size;
 };
 
 } // namespace core
