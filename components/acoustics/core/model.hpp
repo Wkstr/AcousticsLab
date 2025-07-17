@@ -63,8 +63,8 @@ public:
     public:
         using ForwardCallback = std::function<core::Status(Graph &)>;
 
-        Graph(int id, std::string name, std::vector<Tensor> &&inputs, std::vector<Tensor> &&outputs,
-            std::vector<Tensor::QuantParams> &&input_quant_params,
+        Graph(int id, std::string name, std::vector<std::shared_ptr<Tensor>> &&inputs,
+            std::vector<std::shared_ptr<Tensor>> &&outputs, std::vector<Tensor::QuantParams> &&input_quant_params,
             std::vector<Tensor::QuantParams> &&output_quant_params,
             ForwardCallback &&forward_callback = nullptr) noexcept
             : _id(id), _name(std::move(name)), _inputs(std::move(inputs)), _outputs(std::move(outputs)),
@@ -135,7 +135,7 @@ public:
                 LOG(ERROR, "Input index out of bounds: %zu >= %zu", index, _inputs.size());
                 return nullptr;
             }
-            return &_inputs[index];
+            return _inputs[index].get();
         }
 
         inline Tensor *output(size_t index) noexcept
@@ -145,7 +145,7 @@ public:
                 LOG(ERROR, "Output index out of bounds: %zu >= %zu", index, _outputs.size());
                 return nullptr;
             }
-            return &_outputs[index];
+            return _outputs[index].get();
         }
 
         inline Tensor::QuantParams inputQuantParams(size_t index) const noexcept
@@ -154,7 +154,7 @@ public:
             {
                 LOG(ERROR, "Input quantization parameters index out of bounds: %zu >= %zu", index,
                     _input_quant_params.size());
-                return { 1.0f, 0 };
+                return Tensor::QuantParams { 1.0f, 0 };
             }
             return _input_quant_params[index];
         }
@@ -165,7 +165,7 @@ public:
             {
                 LOG(ERROR, "Output quantization parameters index out of bounds: %zu >= %zu", index,
                     _output_quant_params.size());
-                return { 1.0f, 0 };
+                return Tensor::QuantParams { 1.0f, 0 };
             }
             return _output_quant_params[index];
         }
@@ -193,8 +193,8 @@ public:
     private:
         const int _id;
         std::string _name;
-        std::vector<Tensor> _inputs;
-        std::vector<Tensor> _outputs;
+        std::vector<std::shared_ptr<Tensor>> _inputs;
+        std::vector<std::shared_ptr<Tensor>> _outputs;
         std::vector<Tensor::QuantParams> _input_quant_params;
         std::vector<Tensor::QuantParams> _output_quant_params;
 
