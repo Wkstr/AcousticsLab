@@ -330,7 +330,7 @@ for (size_t i = 0; i < num_elements; ++i) {
 ```cmake
 # examples/audio_classification/main/CMakeLists.txt
 target_add_binary_data(${COMPONENT_LIB}
-    "../../../fixed2conv_model.tflite"
+    "../../../models/fixed2conv_model.tflite"
     BINARY)
 ```
 
