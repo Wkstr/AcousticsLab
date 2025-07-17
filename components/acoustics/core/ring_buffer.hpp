@@ -16,16 +16,17 @@
 
 namespace core {
 
-template<typename T, std::enable_if_t<std::is_trivially_copyable_v<T> && std::is_trivially_destructible_v<T>, int> = 0>
+template<typename T,
+    std::enable_if_t<std::is_trivially_copyable_v<T> && std::is_trivially_destructible_v<T>, bool> = true>
 class RingBuffer final
 {
 public:
     template<typename P = std::unique_ptr<RingBuffer<T>>>
-    static P create(size_t max_capacity, void *buffer = nullptr, size_t size = 0)
+    [[nodiscard]] static P create(size_t max_capacity, T *buffer = nullptr, size_t size = 0) noexcept
     {
-        if (max_capacity < 32)
+        if (max_capacity < 4)
         {
-            LOG(ERROR, "RingBuffer max capacity must be at least 32");
+            LOG(ERROR, "RingBuffer max capacity must be at least 4");
             return nullptr;
         }
 
@@ -41,26 +42,25 @@ public:
             return nullptr;
         }
 
-        if (max_capacity % 32 != 0)
+        if (max_capacity % 2 != 0)
         {
-            LOG(ERROR, "RingBuffer max capacity must be a multiple of 32");
+            LOG(ERROR, "RingBuffer max capacity must be a multiple of 2");
             return nullptr;
         }
 
-        const size_t bytes_needed = max_capacity * sizeof(T);
-        if (size && size < bytes_needed)
+        if (size && size < max_capacity * sizeof(T))
         {
-            LOG(ERROR, "Provided size (%zu) is less than required size (%zu)", size, bytes_needed);
+            LOG(ERROR, "Provided size (%zu) is less than required size (%zu)", size, max_capacity * sizeof(T));
             return nullptr;
         }
 
         bool internal_buffer = false;
         if (!buffer)
         {
-            buffer = reinterpret_cast<T *>(new (std::nothrow) std::byte[bytes_needed]);
+            buffer = new (std::nothrow) T[max_capacity] {};
             if (!buffer)
             {
-                LOG(ERROR, "Failed to allocate memory for RingBuffer, size: %zu bytes", bytes_needed);
+                LOG(ERROR, "Failed to allocate memory for RingBuffer, size: %zu bytes", max_capacity * sizeof(T));
                 return nullptr;
             }
             internal_buffer = true;
@@ -69,10 +69,10 @@ public:
         P ptr(new (std::nothrow) RingBuffer<T>(internal_buffer, buffer, max_capacity));
         if (!ptr)
         {
-            LOG(ERROR, "Failed to create RingBuffer, size: %zu bytes", bytes_needed);
+            LOG(ERROR, "Failed to create RingBuffer, size: %zu bytes", sizeof(RingBuffer<T>));
             if (internal_buffer)
             {
-                delete[] reinterpret_cast<std::byte *>(buffer);
+                delete[] buffer;
             }
             return nullptr;
         }
@@ -80,11 +80,11 @@ public:
         return ptr;
     }
 
-    ~RingBuffer()
+    ~RingBuffer() noexcept
     {
         if (_internal_buffer && _buffer)
         {
-            delete[] reinterpret_cast<std::byte *>(_buffer);
+            delete[] _buffer;
         }
         _buffer = nullptr;
     }
@@ -123,39 +123,34 @@ public:
         return _buffer;
     }
 
-    inline size_t put(const T &value) noexcept
+    inline size_t put(const T &value, bool try_overwrite = true) noexcept
     {
-        size_t head = _head.load(std::memory_order_relaxed);
+        const size_t head = _head.load(std::memory_order_relaxed);
         size_t tail = _tail.load(std::memory_order_acquire);
 
-        const size_t next_head = (head + 1) & _capacity_mask;
-        size_t next_tail = tail;
-        const bool overflow = next_head == tail;
-
         T *ptr = _buffer + head;
-        if (overflow) [[unlikely]]
-        {
-            next_tail = (tail + 1) & _capacity_mask;
 
-            while (1)
+        const size_t next_head = (head + 1) & _capacity_mask;
+        if (next_head == tail) [[unlikely]]
+        {
+            if (!try_overwrite)
             {
-                void *expected_lock = nullptr;
-                if (_lock.compare_exchange_weak(expected_lock, ptr, std::memory_order_acquire,
-                        std::memory_order_relaxed)) [[likely]]
+                return 0;
+            }
+
+            if (_tail.compare_exchange_strong(tail, (next_head + 1) & _capacity_mask, std::memory_order_release,
+                    std::memory_order_relaxed)) [[likely]]
+            {
+                if (ptr == _lock.load(std::memory_order_relaxed)) [[unlikely]]
                 {
-                    break;
+                    return 0;
                 }
             }
         }
 
         *ptr = value;
 
-        _head.compare_exchange_strong(head, next_head, std::memory_order_release, std::memory_order_relaxed);
-        if (overflow) [[unlikely]]
-        {
-            _lock.store(nullptr, std::memory_order_release);
-            _tail.compare_exchange_strong(tail, next_tail, std::memory_order_release, std::memory_order_relaxed);
-        }
+        _head.store(next_head, std::memory_order_release);
 
         return 1;
     }
@@ -173,27 +168,30 @@ public:
 
         while (1)
         {
-            void *expected_lock = nullptr;
-            if (_lock.compare_exchange_weak(expected_lock, ptr, std::memory_order_acquire, std::memory_order_relaxed))
-                [[likely]]
+            _lock.store(ptr, std::memory_order_release);
+
+            const size_t current_tail = _tail.load(std::memory_order_relaxed);
+            if (current_tail == tail) [[likely]]
             {
                 break;
             }
+            tail = current_tail;
+            ptr = _buffer + tail;
         }
 
         value = *ptr;
 
-        _lock.store(nullptr, std::memory_order_release);
-
-        const size_t next_tail = (tail + 1) & _capacity_mask;
-        _tail.compare_exchange_strong(tail, next_tail, std::memory_order_release, std::memory_order_relaxed);
+        _tail.compare_exchange_strong(tail, (tail + 1) & _capacity_mask, std::memory_order_release,
+            std::memory_order_relaxed);
 
         _pos = 0;
+
+        _lock.store(nullptr, std::memory_order_release);
 
         return 1;
     }
 
-    inline size_t write(const T *buffer, size_t count) noexcept
+    inline size_t write(const T *buffer, size_t count, bool overwrite = true) noexcept
     {
         if (!buffer || !count) [[unlikely]]
         {
@@ -208,9 +206,9 @@ public:
         }
 
         size_t head = _head.load(std::memory_order_relaxed);
-        size_t tail = _tail.load(std::memory_order_acquire);
+        const size_t tail = _tail.load(std::memory_order_acquire);
 
-        size_t available = head >= tail ? rb_capacity - head + tail : tail - head - 1;
+        const size_t available = head >= tail ? rb_capacity - head + tail : tail - head - 1;
         const size_t safe_count = std::min(count, available);
 
         const size_t part_1_start = head;
@@ -227,12 +225,15 @@ public:
         }
         size_t written = safe_count;
 
-        const size_t next_head = (head + safe_count) & _capacity_mask;
-        _head.compare_exchange_strong(head, next_head, std::memory_order_release, std::memory_order_relaxed);
+        _head.compare_exchange_strong(head, (head + safe_count) & _capacity_mask, std::memory_order_release,
+            std::memory_order_relaxed);
 
-        while (written < count)
+        if (overwrite)
         {
-            written += put(*(buffer + written));
+            while (written < count)
+            {
+                written += put(*(buffer + written), true);
+            }
         }
 
         return written;
@@ -240,61 +241,73 @@ public:
 
     inline size_t read(T *buffer, size_t count) noexcept
     {
-        const size_t head = _head.load(std::memory_order_acquire);
-        size_t tail = _tail.load(std::memory_order_relaxed);
-
-        if (head == tail || !count) [[unlikely]]
+        if (count == 0) [[unlikely]]
         {
             return 0;
         }
 
-        size_t copied = 0;
+        size_t head = _head.load(std::memory_order_acquire);
+        size_t tail = _tail.load(std::memory_order_relaxed);
+        if (head == tail) [[unlikely]]
+        {
+            return 0;
+        }
+
+        T *ptr = _buffer + tail;
+
+        while (1)
+        {
+            _lock.store(ptr, std::memory_order_release);
+
+            const size_t current_tail = _tail.load(std::memory_order_acquire);
+            if (current_tail == tail) [[likely]]
+            {
+                break;
+            }
+            head = _head.load(std::memory_order_relaxed);
+            tail = current_tail;
+            ptr = _buffer + tail;
+        }
+
+        size_t read = 0;
         size_t next_tail = tail;
         if (buffer)
         {
-            while (head != next_tail && copied < count)
+            while (read < count && next_tail != head)
             {
-                T *ptr = _buffer + next_tail;
-
-                while (1)
-                {
-                    void *expected_lock = nullptr;
-                    if (_lock.compare_exchange_weak(expected_lock, ptr, std::memory_order_acquire,
-                            std::memory_order_relaxed)) [[likely]]
-                    {
-                        break;
-                    }
-                }
-
-                buffer[copied++] = *ptr;
-
-                _lock.store(nullptr, std::memory_order_release);
-
+                buffer[read++] = *ptr;
                 next_tail = (next_tail + 1) & _capacity_mask;
+                ptr = _buffer + next_tail;
             }
         }
         else
         {
-            while (head != next_tail && copied < count)
+            const size_t size = head >= tail ? head - tail : _max_capacity - tail + head;
+            if (count > size) [[unlikely]]
             {
-                ++copied;
-                next_tail = (next_tail + 1) & _capacity_mask;
+                count = size;
             }
+            read = count;
+            next_tail = (tail + count) & _capacity_mask;
         }
 
-        size_t expected = tail;
-        while (expected != next_tail)
+        size_t expected_tail = tail;
+        while (expected_tail != next_tail)
         {
-            if (_tail.compare_exchange_weak(expected, next_tail, std::memory_order_release, std::memory_order_relaxed))
+            if (_tail.compare_exchange_strong(expected_tail, next_tail, std::memory_order_release,
+                    std::memory_order_relaxed)) [[likely]]
             {
                 break;
             }
-            expected = ++tail & _capacity_mask;
+            tail = (tail + 1) & _capacity_mask;
+            expected_tail = tail;
         }
 
         _pos = 0;
 
-        return copied;
+        _lock.store(nullptr, std::memory_order_release);
+
+        return read;
     }
 
     inline size_t tellg() const noexcept
@@ -316,28 +329,32 @@ public:
 
     inline bool peek(T &value) const noexcept
     {
-        const size_t head = _head.load(std::memory_order_acquire);
-        const size_t tail = _tail.load(std::memory_order_relaxed);
-        const size_t size = head >= tail ? head - tail : _max_capacity - tail + head;
+        size_t head = _head.load(std::memory_order_acquire);
+        size_t tail = _tail.load(std::memory_order_relaxed);
+        size_t size = head >= tail ? head - tail : _max_capacity - tail + head;
         if (_pos >= size) [[unlikely]]
         {
             return false;
         }
 
-        const size_t pos = (tail + _pos++) & _capacity_mask;
-        T *ptr = _buffer + pos;
+        T *ptr = _buffer + ((tail + _pos) & _capacity_mask);
 
-        void *expected_lock = nullptr;
         while (1)
         {
-            if (_lock.compare_exchange_weak(expected_lock, ptr, std::memory_order_acquire, std::memory_order_relaxed))
-                [[likely]]
+            _lock.store(ptr, std::memory_order_release);
+
+            const size_t current_tail = _tail.load(std::memory_order_relaxed);
+            if (current_tail == tail) [[likely]]
             {
                 break;
             }
+            tail = current_tail;
+            ptr = _buffer + ((tail + _pos) & _capacity_mask);
         }
 
         value = *ptr;
+
+        _pos += 1;
 
         _lock.store(nullptr, std::memory_order_release);
 
@@ -346,14 +363,17 @@ public:
 
     void clear() noexcept
     {
+        while (_lock.load(std::memory_order_acquire)) [[unlikely]] { }
+
         _head.store(0, std::memory_order_release);
         _tail.store(0, std::memory_order_release);
+
         _pos = 0;
     }
 
 protected:
-    RingBuffer(bool internal_buffer, void *buffer, size_t max_capacity)
-        : _internal_buffer(internal_buffer), _buffer(static_cast<T *>(buffer)), _max_capacity(max_capacity),
+    explicit RingBuffer(bool internal_buffer, T *buffer, size_t max_capacity) noexcept
+        : _internal_buffer(internal_buffer), _buffer(buffer), _max_capacity(max_capacity),
           _capacity_mask(_max_capacity - 1), _head(0), _tail(0), _lock(nullptr), _pos(0)
     {
 #ifdef __cpp_lib_atomic_is_always_lock_free
