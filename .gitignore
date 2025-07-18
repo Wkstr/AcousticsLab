@@ -1,3 +1,7 @@
+# Git
+*.patch
+*.diff
+
 # macOS
 .DS_Store
 
@@ -6,10 +10,12 @@
 
 # IDF
 examples/**/build
+examples/**/managed_components
 examples/**/sdkconfig
 examples/**/sdkconfig.old
 examples/**/dependencies.lock
 examples/**/**.lock
+examples/**/managed_components
 
 # Binary files
 **.bin

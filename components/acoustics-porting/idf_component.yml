@@ -10,6 +10,4 @@ dependencies:
   littlefs:
     version: ">=2.11.0"
     path: porting/driver/littlefs
-  microphone:
-    version: ">=1.0.0"
-    path: porting/driver/microphone
+  espressif/esp-tflite-micro: '*'

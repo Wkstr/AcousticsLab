@@ -1,5 +1,0 @@
-version: "1.0.0"
-description: I2S PDM Microphone driver for Espressif Chipsets
-
-dependencies:
-  idf: ">=5.1.0"

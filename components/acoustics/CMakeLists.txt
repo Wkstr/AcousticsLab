@@ -7,105 +7,76 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 
-set(ACOUSTIC_INCLUDES_DIR
+set(ACOUSTICS_INCLUDES_DIR
     ${CMAKE_CURRENT_LIST_DIR}/
 )
+message(STATUS "Include directory: ${ACOUSTICS_INCLUDES_DIR}")
 
-# Add KissFFT include directory
-set(KISSFFT_INCLUDE_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party/kissfft")
-if(EXISTS "${KISSFFT_INCLUDE_DIR}")
-    list(APPEND ACOUSTIC_INCLUDES_DIR "${KISSFFT_INCLUDE_DIR}")
-    message(STATUS "Added KissFFT include directory: ${KISSFFT_INCLUDE_DIR}")
-else()
-    message(WARNING "KissFFT include directory not found: ${KISSFFT_INCLUDE_DIR}")
-endif()
-
-message(STATUS "Include directory: ${ACOUSTIC_INCLUDES_DIR}")
-
-file(GLOB ACOUSTIC_SRCS_API
+file(GLOB ACOUSTICS_SRCS_API
     ${CMAKE_CURRENT_LIST_DIR}/api/*.c
     ${CMAKE_CURRENT_LIST_DIR}/api/*.hpp
     ${CMAKE_CURRENT_LIST_DIR}/api/*.cpp
 )
 
-if(NOT DEFINED ACOUSTIC_API_VERSION)
-    message(WARNING "ACOUSTIC_API_VERSION is not defined, defaulting to 0")
-    set(ACOUSTIC_API_VERSION "0")
+if(NOT DEFINED ACOUSTICS_API_VERSION)
+    message(WARNING "ACOUSTICS_API_VERSION is not defined, defaulting to 0")
+    set(ACOUSTICS_API_VERSION "0")
 endif()
 
-if(${ACOUSTIC_API_VERSION} STREQUAL "0")
-    file(GLOB_RECURSE ACOUSTIC_SRCS_API_V0
+if(${ACOUSTICS_API_VERSION} STREQUAL "0")
+    file(GLOB_RECURSE ACOUSTICS_SRCS_API_V0
         ${CMAKE_CURRENT_LIST_DIR}/api/v0/*.c
         ${CMAKE_CURRENT_LIST_DIR}/api/v0/*.hpp
         ${CMAKE_CURRENT_LIST_DIR}/api/v0/*.cpp
     )
-    list(APPEND ACOUSTIC_SRCS_API ${ACOUSTIC_SRCS_API_V0})
+    list(APPEND ACOUSTICS_SRCS_API ${ACOUSTICS_SRCS_API_V0})
     message(STATUS "Using API version 0 sources")
 endif()
 
-if(NOT DEFINED ACOUSTIC_SRCS_API)
-    message(FATAL_ERROR "ACOUSTIC_SRCS_API is not defined")
+if(NOT DEFINED ACOUSTICS_SRCS_API)
+    message(FATAL_ERROR "ACOUSTICS_SRCS_API is not defined")
 endif()
-message(STATUS "ACOUSTIC_SRCS_API: ${ACOUSTIC_SRCS_API}")
+message(STATUS "ACOUSTICS_SRCS_API: ${ACOUSTICS_SRCS_API}")
 
-file(GLOB_RECURSE ACOUSTIC_SRCS_CORE
+file(GLOB_RECURSE ACOUSTICS_SRCS_CORE
     ${CMAKE_CURRENT_LIST_DIR}/core/*.c
     ${CMAKE_CURRENT_LIST_DIR}/core/*.hpp
     ${CMAKE_CURRENT_LIST_DIR}/core/*.cpp
 )
-message(STATUS "ACOUSTIC_SRCS_CORE: ${ACOUSTIC_SRCS_CORE}")
+message(STATUS "ACOUSTICS_SRCS_CORE: ${ACOUSTICS_SRCS_CORE}")
 
-file(GLOB_RECURSE ACOUSTIC_SRCS_HAL
+file(GLOB_RECURSE ACOUSTICS_SRCS_HAL
     ${CMAKE_CURRENT_LIST_DIR}/hal/*.c
     ${CMAKE_CURRENT_LIST_DIR}/hal/*.hpp
     ${CMAKE_CURRENT_LIST_DIR}/hal/*.cpp
 )
+message(STATUS "ACOUSTICS_SRCS_HAL: ${ACOUSTICS_SRCS_HAL}")
 
-
-message(STATUS "ACOUSTIC_SRCS_HAL: ${ACOUSTIC_SRCS_HAL}")
-
-set(ACOUSTIC_SRCS
-    ${ACOUSTIC_SRCS_API}
-    ${ACOUSTIC_SRCS_CORE}
-    ${ACOUSTIC_SRCS_HAL}
+set(ACOUSTICS_SRCS
+    ${ACOUSTICS_SRCS_API}
+    ${ACOUSTICS_SRCS_CORE}
+    ${ACOUSTICS_SRCS_HAL}
 )
 
-get_property(ACOUSTIC_SDK_TARGET GLOBAL PROPERTY ACOUSTIC_SDK_TARGET)
-message(STATUS "ACOUSTIC_SDK_TARGET: ${ACOUSTIC_SDK_TARGET}")
+get_property(ACOUSTICS_SDK_TARGET GLOBAL PROPERTY ACOUSTICS_SDK_TARGET)
+message(STATUS "ACOUSTICS_SDK_TARGET: ${ACOUSTICS_SDK_TARGET}")
 
-if(NOT DEFINED ACOUSTIC_SDK_TARGET OR "${ACOUSTIC_SDK_TARGET}" STREQUAL "")
-    message(WARNING "ACOUSTIC_SDK_TARGET is not defined, defaulting to POSIX")
-    set(ACOUSTIC_SDK_TARGET "POSIX")
+if(NOT DEFINED ACOUSTICS_SDK_TARGET)
+    message(FATAL_ERROR "ACOUSTICS_SDK_TARGET is not defined")
 endif()
 
-if(${ACOUSTIC_SDK_TARGET} STREQUAL "POSIX")
+if(${ACOUSTICS_SDK_TARGET} STREQUAL "POSIX")
     message(STATUS "Building for POSIX")
 
-    # Check if we're in ESP-IDF environment
-    if(DEFINED IDF_TARGET)
-        message(STATUS "Building acoustics for ESP-IDF")
-        # Use idf_component_register for ESP-IDF
-        idf_component_register(
-            SRCS ${ACOUSTIC_SRCS}
-            INCLUDE_DIRS ${ACOUSTIC_INCLUDES_DIR}
-            REQUIRES freertos esp_common esp-tflite-micro esp-nn
-        )
+    add_library(acoustics STATIC ${ACOUSTICS_SRCS})
 
-        target_compile_definitions(${COMPONENT_LIB} PUBLIC
-            ACOUSTICS_API_VERSION=${ACOUSTIC_API_VERSION}
-        )
-    else()
-        message(STATUS "Building acoustics for native POSIX")
-        # Use add_library for native builds
-        add_library(acoustics STATIC ${ACOUSTIC_SRCS})
+    target_include_directories(acoustics PUBLIC
+        ${ACOUSTICS_INCLUDES_DIR}
+    )
 
-        target_include_directories(acoustics PUBLIC
-            ${ACOUSTIC_INCLUDES_DIR}
-        )
-
-        target_compile_definitions(acoustics PUBLIC
-            ACOUSTICS_API_VERSION=${ACOUSTIC_API_VERSION}
-        )
+    target_compile_definitions(acoustics PUBLIC
+        ACOUSTICS_API_VERSION=${ACOUSTICS_API_VERSION}
+    )
 
         set_target_properties(acoustics PROPERTIES
             CXX_STANDARD 20

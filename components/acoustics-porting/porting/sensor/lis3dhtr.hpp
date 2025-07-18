@@ -160,7 +160,6 @@ public:
                 LOG(ERROR, "Failed to start timer: %d", ret);
                 return STATUS(EFAULT, "Failed to start timer");
             }
-            _info.status = Status::Idle;
         }
 
         {
@@ -182,6 +181,7 @@ public:
 
         {
             _sensor_status = 0;
+            _info.status = Status::Idle;
         }
 
         return STATUS_OK();
@@ -287,63 +287,54 @@ public:
             LOG(ERROR, "Sensor is not initialized");
             return STATUS(ENXIO, "Sensor is not initialized");
         }
-
         if (_sensor_status != 0) [[unlikely]]
         {
             LOG(ERROR, "Sensor status is invalid: %d", _sensor_status);
             return STATUS(_sensor_status, "Sensor status is invalid");
         }
-
-        if (!_buffer) [[unlikely]]
+        if (_data_buffer.use_count() > 1) [[unlikely]]
         {
-            LOG(ERROR, "Buffer is not initialized");
-            return STATUS(EFAULT, "Buffer is not initialized");
+            LOG(ERROR, "Data buffer is already in use by another process");
+            return STATUS(EBUSY, "Data buffer is already in use");
         }
 
         if (batch_size > _buffer_capacity) [[unlikely]]
         {
-            LOG(ERROR, "Batch size exceeds buffer capacity: %zu > %zu", batch_size, _buffer_capacity);
-            return STATUS(EOVERFLOW, "Batch size exceeds buffer capacity");
+            LOG(WARNING, "Batch size exceeds buffer capacity: %zu > %zu", batch_size, _buffer_capacity);
+            batch_size = _buffer_capacity;
         }
-
-        if (_buffer->size() < batch_size)
-        {
-            LOG(DEBUG, "Not enough data in buffer: %zu < %zu", _buffer->size(), batch_size);
-            return STATUS(EAGAIN, "Not enough data in buffer");
-        }
-
-        if (!_data_buffer) [[unlikely]]
-        {
-            LOG(ERROR, "Data buffer is not initialized");
-            return STATUS(EFAULT, "Data buffer is not initialized");
-        }
-
         if (batch_size > _data_buffer_capacity) [[unlikely]]
         {
-            LOG(ERROR, "Batch size exceeds data buffer capacity: %zu > %zu", batch_size, _data_buffer_capacity);
-            return STATUS(EOVERFLOW, "Batch size exceeds data buffer capacity");
+            LOG(WARNING, "Batch size exceeds data buffer capacity: %zu > %zu", batch_size, _data_buffer_capacity);
+            batch_size = _data_buffer_capacity;
         }
 
         _info.status = Status::Locked;
 
-        const size_t n_elems_to_discard = _buffer->size() - batch_size;
-        if (n_elems_to_discard > 0)
+        const size_t available = _buffer->size();
+        if (available > batch_size)
         {
-            const auto discarded = _buffer->read(nullptr, n_elems_to_discard);
+            [[maybe_unused]] const auto discarded = _buffer->read(nullptr, available - batch_size);
             LOG(DEBUG, "Discarded %zu staled elements from buffer", discarded);
         }
-        batch_size = _buffer->read(reinterpret_cast<Data *>(_data_buffer.get()), batch_size);
+        else if (available < batch_size)
+        {
+            LOG(WARNING, "Not enough data in buffer: %zu available, requested %zu", available, batch_size);
+            batch_size = available;
+        }
 
         data_frame.timestamp = std::chrono::steady_clock::now();
-        data_frame.index = _frame_index;
-        data_frame.data = core::Tensor::create(core::Tensor::Type::Float32, core::Tensor::Shape(batch_size, 3),
-            reinterpret_cast<void *>(_data_buffer.get()), _data_buffer_capacity * sizeof(Data));
 
+        batch_size = _buffer->read(reinterpret_cast<Data *>(_data_buffer.get()), batch_size);
+        data_frame.data = core::Tensor::create(core::Tensor::Type::Float32, core::Tensor::Shape(batch_size, 3),
+            _data_buffer, _data_buffer_capacity * sizeof(Data));
+
+        data_frame.index = _frame_index;
         _frame_index += batch_size;
 
         _info.status = Status::Idle;
 
-        return STATUS_OK();
+        return data_frame.data ? STATUS_OK() : STATUS(ENOMEM, "Failed to create data frame tensor");
     }
 
 public:

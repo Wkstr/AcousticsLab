@@ -1,0 +1,6 @@
+dependencies:
+  idf:
+    version: '>=5.4.0'
+  acoustics-porting:
+    version: '>=1.0.0'
+    path: ../../../components/acoustics-porting
