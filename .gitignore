@@ -1,3 +1,7 @@
+# Git
+*.patch
+*.diff
+
 # macOS
 .DS_Store
 
@@ -6,6 +10,7 @@
 
 # IDF
 examples/**/build
+examples/**/managed_components
 examples/**/sdkconfig
 examples/**/sdkconfig.old
 examples/**/dependencies.lock
@@ -31,3 +36,6 @@ docs/perlmod
 __pycache__
 *.pyc
 .venv
+
+# Logs
+*.log
