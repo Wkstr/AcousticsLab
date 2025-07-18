@@ -85,21 +85,34 @@ public:
         size_t _dot;
     };
 
-    struct QuantParams final
+    class QuantParams final
     {
-        explicit QuantParams(float scale = 1.0f, int zero_point = 0) noexcept
-            : scale(scale), zero_point(static_cast<int32_t>(zero_point))
+    public:
+        explicit QuantParams(float scale = 1.0f, int32_t zero_point = 0) noexcept
+            : _scale(scale), _zero_point(zero_point)
         {
-            if (std::isnan(scale) || std::isinf(scale) || scale <= std::numeric_limits<float>::epsilon()) [[unlikely]]
+            if (std::isnan(_scale) || std::isinf(_scale) || _scale <= std::numeric_limits<float>::epsilon())
+                [[unlikely]]
             {
-                LOG(ERROR, "Invalid scale value: %f", static_cast<double>(scale));
+                LOG(ERROR, "Invalid scale value: %f", static_cast<double>(_scale));
             }
         }
 
         ~QuantParams() = default;
 
-        const float scale;
-        const int32_t zero_point;
+        constexpr inline float scale() const noexcept
+        {
+            return _scale;
+        }
+
+        constexpr inline int32_t zeroPoint() const noexcept
+        {
+            return _zero_point;
+        }
+
+    private:
+        float _scale;
+        int32_t _zero_point;
     };
 
     template<typename T = std::shared_ptr<Tensor>, typename P>
