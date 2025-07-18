@@ -128,7 +128,8 @@ public:
         return nullptr;
     }
 
-    virtual const core::Status loadModel(const core::Model::Info &info, std::shared_ptr<core::Model> &model) noexcept
+    virtual core::Status loadModel(const std::shared_ptr<core::Model::Info> &info,
+        std::shared_ptr<core::Model> &model) noexcept
         = 0;
 
     const core::Status loadModel(const std::string &name, std::shared_ptr<core::Model> &model) noexcept
@@ -139,7 +140,7 @@ public:
             LOG(ERROR, "Model info with name '%s' not found", name.data());
             return STATUS(EINVAL, "Model info not found");
         }
-        return loadModel(*model_info, model);
+        return loadModel(model_info, model);
     }
 
 protected:
@@ -161,7 +162,6 @@ protected:
     mutable Info _info;
 
     std::vector<std::shared_ptr<core::Model::Info>> _model_infos;
-    std::vector<std::shared_ptr<core::Model>> _models;
 };
 
 } // namespace hal
