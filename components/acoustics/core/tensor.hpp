@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <new>
 #include <numeric>
 #include <type_traits>
 #include <utility>
@@ -102,7 +103,8 @@ public:
     };
 
     template<typename T = std::shared_ptr<Tensor>, typename P>
-    [[nodiscard]] static T create(Type dtype, P &&shape, void *data = nullptr, size_t size = 0) noexcept
+    [[nodiscard]] static T create(Type dtype, P &&shape, std::shared_ptr<std::byte[]> data = nullptr,
+        size_t size = 0) noexcept
     {
         if (dtype == Type::Unknown) [[unlikely]]
         {
@@ -139,42 +141,27 @@ public:
             LOG(ERROR, "Data buffer size is too small: %zu bytes required, %zu bytes provided", bytes_required, size);
             return {};
         }
-
-        bool internal_data = false;
         if (!data)
         {
-            data = new (std::nothrow) std::byte[bytes_required];
+            data = std::shared_ptr<std::byte[]>(new (std::nothrow) std::byte[bytes_required]);
             if (!data) [[unlikely]]
             {
                 LOG(ERROR, "Failed to allocate memory for tensor data, size: %zu bytes", bytes_required);
                 return {};
             }
-            internal_data = true;
         }
 
-        T ptr(new (std::nothrow) Tensor(dtype, dsize, std::forward<P>(shape), internal_data,
-            static_cast<std::byte *>(data), bytes_required));
+        T ptr(new (std::nothrow) Tensor(dtype, dsize, std::forward<P>(shape), std::move(data), bytes_required));
         if (!ptr) [[unlikely]]
         {
             LOG(ERROR, "Failed to create Tensor, size: %zu bytes", sizeof(Tensor));
-            if (internal_data)
-            {
-                delete[] static_cast<std::byte *>(data);
-            }
             return {};
         }
 
         return ptr;
     }
 
-    ~Tensor() noexcept
-    {
-        if (_internal_data && _data)
-        {
-            delete[] _data;
-        }
-        _data = nullptr;
-    }
+    ~Tensor() = default;
 
     inline Type dtype() const noexcept
     {
@@ -191,13 +178,13 @@ public:
         return _shape;
     }
 
-    inline const std::byte *data() const noexcept
+    inline std::shared_ptr<std::byte[]> data() noexcept
     {
         return _data;
     }
 
     template<typename T, std::enable_if_t<std::is_trivially_copyable_v<T>, bool> = true>
-    inline T *dataAs() noexcept
+    inline T *data() noexcept
     {
         if (sizeof(T) != _dsize) [[unlikely]]
         {
@@ -205,19 +192,19 @@ public:
                 static_cast<size_t>((static_cast<uint16_t>(_dtype) >> 8)));
             return nullptr;
         }
-        return reinterpret_cast<T *>(_data);
+        return reinterpret_cast<T *>(_data.get());
     }
 
     template<typename T, std::enable_if_t<std::is_trivially_copyable_v<T>, bool> = true>
-    inline const T *dataAs() const noexcept
+    inline const T *data() const noexcept
     {
-        return reinterpret_cast<const T *>(_data);
+        return data<T>();
     }
 
     template<typename T, std::enable_if_t<std::is_trivially_copyable_v<T>, bool> = true>
     inline T operator[](size_t index) const noexcept
     {
-        return reinterpret_cast<const T *>(_data)[index];
+        return reinterpret_cast<const T *>(_data.get())[index];
     }
 
     template<typename... Args>
@@ -244,9 +231,8 @@ public:
 
 protected:
     template<typename T>
-    explicit Tensor(Type dtype, size_t dsize, T &&shape, bool internal_data, std::byte *data, size_t size) noexcept
-        : _dtype(dtype), _dsize(dsize), _shape(std::forward<T>(shape)), _internal_data(internal_data), _data(data),
-          _size(size)
+    explicit Tensor(Type dtype, size_t dsize, T &&shape, std::shared_ptr<std::byte[]> &&data, size_t size) noexcept
+        : _dtype(dtype), _dsize(dsize), _shape(std::forward<T>(shape)), _data(std::move(data)), _size(size)
     {
     }
 
@@ -254,8 +240,7 @@ private:
     const Type _dtype;
     const size_t _dsize;
     Shape _shape;
-    const bool _internal_data;
-    std::byte *_data;
+    std::shared_ptr<std::byte[]> _data;
     const size_t _size;
 };
 

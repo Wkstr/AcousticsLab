@@ -117,7 +117,7 @@ public:
                 available = shape[0];
                 if (available < 1 || data_frame.data->dtype() != core::Tensor::Type::Float32) [[unlikely]]
                 {
-                    LOG(ERROR, "Data frame shape or type mismatch: Shape=(%zu,%zu), DType=%d", shape[0], shape[1],
+                    LOG(ERROR, "Data frame shape or type mismatch: shape=(%zu,%zu), dtype=%d", shape[0], shape[1],
                         static_cast<int>(data_frame.data->dtype()));
                     return replyWithStatus(STATUS(EINVAL, "Data frame shape or type mismatch"),
                         std::chrono::steady_clock::now());
@@ -139,7 +139,7 @@ public:
                     }
                     for (size_t i = 0, h = head; i < size; i += axes, ++h)
                     {
-                        const auto data_i = &data_frame.data->dataAs<float>()[i];
+                        const auto data_i = &data_frame.data->data<float>()[i];
                         const auto index = h & v0::shared::buffer_size_mask;
                         for (size_t j = 0; j < buffer_axes; ++j)
                         {
