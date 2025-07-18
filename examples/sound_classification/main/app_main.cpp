@@ -1,9 +1,8 @@
-
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/timers.h>
 
-static void executor_task(void *)
+extern "C" void app_main()
 {
     while (1)
     {
