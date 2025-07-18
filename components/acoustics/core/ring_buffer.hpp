@@ -125,7 +125,7 @@ public:
 
     inline size_t put(const T &value, bool try_overwrite = true) noexcept
     {
-        const size_t head = _head.load(std::memory_order_relaxed);
+        size_t head = _head.load(std::memory_order_relaxed);
         size_t tail = _tail.load(std::memory_order_acquire);
 
         T *ptr = _buffer + head;
@@ -150,9 +150,8 @@ public:
 
         *ptr = value;
 
-        _head.store(next_head, std::memory_order_release);
-
-        return 1;
+        return _head.compare_exchange_strong(head, next_head, std::memory_order_release, std::memory_order_relaxed) ? 1
+                                                                                                                    : 0;
     }
 
     inline size_t get(T &value) noexcept
@@ -363,10 +362,10 @@ public:
 
     void clear() noexcept
     {
-        while (_lock.load(std::memory_order_acquire)) [[unlikely]] { }
-
         _head.store(0, std::memory_order_release);
         _tail.store(0, std::memory_order_release);
+
+        while (_lock.load(std::memory_order_acquire)) [[unlikely]] { }
 
         _pos = 0;
     }
