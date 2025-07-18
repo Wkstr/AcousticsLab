@@ -67,6 +67,18 @@ public:
             vTaskDelay(pdMS_TO_TICKS(100));
         }
 
+        if (_mmap_handle) [[likely]]
+        {
+            _mmap_ptr = nullptr;
+            spi_flash_munmap(_mmap_handle);
+            _mmap_handle = 0;
+        }
+
+        if (_op_resolver) [[likely]]
+        {
+            _op_resolver.reset();
+        }
+
         if (_tensor_arena) [[likely]]
         {
             heap_caps_free(_tensor_arena);
