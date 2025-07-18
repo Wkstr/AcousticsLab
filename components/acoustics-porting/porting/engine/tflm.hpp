@@ -48,20 +48,19 @@ class EngineTFLM final: public hal::Engine
 public:
     static inline core::ConfigObjectMap DEFAULT_CONFIGS() noexcept
     {
-        static core::ConfigObjectMap configs { CONFIG_OBJECT_DECL_INTEGER("tensor_arena_size",
-                                                   "Size of tensor arena in bytes", 2048 * 1024, 512 * 1024,
-                                                   4096 * 1024),
+        return { CONFIG_OBJECT_DECL_INTEGER("tensor_arena_size", "Size of tensor arena in bytes", 2048 * 1024,
+                     512 * 1024, 4096 * 1024),
             CONFIG_OBJECT_DECL_INTEGER("model_lookup_step", "Size of model lookup step in bytes", 1024 * 1024,
                 128 * 1024, 2048 * 1024) };
-
-        return configs;
     }
 
     EngineTFLM() noexcept : Engine(Info(1, "TFLite Micro", Type::TFLiteMicro, { DEFAULT_CONFIGS() })) { }
 
     ~EngineTFLM() override
     {
-        while (!deinit())
+        const std::lock_guard<std::mutex> lock(_lock);
+
+        while (!internalDeInit()) [[unlikely]]
         {
             LOG(WARNING, "Failed to deinitialize TFLite Micro engine, retrying...");
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -151,28 +150,7 @@ public:
     {
         const std::lock_guard<std::mutex> lock(_lock);
 
-        if (_info.status <= Status::Uninitialized)
-        {
-            return STATUS_OK();
-        }
-
-        for (const auto &model: _model_infos)
-        {
-            const auto use_count = model.use_count();
-            if (use_count > 1) [[unlikely]]
-            {
-                LOG(WARNING, "Model '%s' is still in use by %ld references, skipping deinitialization",
-                    model->name.c_str(), use_count);
-                return STATUS(EBUSY, "Model is still in use");
-            }
-        }
-        _model_infos.clear();
-
-        _interpreter.reset();
-
-        _info.status = Status::Uninitialized;
-
-        return STATUS_OK();
+        return internalDeInit();
     }
 
     core::Status updateConfig(const core::ConfigMap &configs) override
@@ -262,6 +240,32 @@ public:
     }
 
 private:
+    core::Status internalDeInit() noexcept
+    {
+        if (_info.status <= Status::Uninitialized)
+        {
+            return STATUS_OK();
+        }
+
+        for (const auto &model_info: _model_infos)
+        {
+            const auto use_count = model_info.use_count();
+            if (use_count > 1) [[unlikely]]
+            {
+                LOG(WARNING, "Model info '%s' is still in use by %ld references, skipping deinitialization",
+                    model_info->name.c_str(), use_count);
+                return STATUS(EBUSY, "Model is still in use");
+            }
+        }
+        _model_infos.clear();
+
+        _interpreter.reset();
+
+        _info.status = Status::Uninitialized;
+
+        return STATUS_OK();
+    }
+
     core::Status findModels() noexcept
     {
         if (!_partition)

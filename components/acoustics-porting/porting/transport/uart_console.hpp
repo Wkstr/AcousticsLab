@@ -27,13 +27,12 @@ namespace porting {
 class TransportUARTConsole final: public hal::Transport
 {
 public:
-    static core::ConfigObjectMap DEFAULT_CONFIGS()
+    static inline core::ConfigObjectMap DEFAULT_CONFIGS() noexcept
     {
-        core::ConfigObjectMap configs;
-        return configs;
+        return {};
     }
 
-    TransportUARTConsole() : Transport(Info(1, "UART Console", Type::UART, { DEFAULT_CONFIGS() })) { }
+    TransportUARTConsole() noexcept : Transport(Info(1, "UART Console", Type::UART, { DEFAULT_CONFIGS() })) { }
 
     core::Status init() override
     {
