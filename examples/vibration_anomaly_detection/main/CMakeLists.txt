@@ -13,8 +13,7 @@ file(GLOB_RECURSE PROJ_SRCS
 idf_component_register(
     SRCS ${PROJ_SRCS}
     INCLUDE_DIRS ${PROJ_INCLUDE_DIRS}
-    REQUIRES freertos esp_psram acoustics-porting
-    PRIV_REQUIRES esp_timer driver spi_flash esp_partition efuse
+    REQUIRES freertos esp_psram esp_system acoustics-porting
 )
 
 add_compile_options(-fdiagnostics-color=always -ffast-math -O2)
