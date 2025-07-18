@@ -66,7 +66,6 @@ set(ACOUSTICS_REQUIRES
     esp_timer
     esp_psram
     esp_partition
-
 )
 
 set(ACOUSTICS_PRIV_REQUIRES
