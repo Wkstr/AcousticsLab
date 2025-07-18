@@ -1,4 +1,5 @@
 #pragma once
+#if defined(PORTING_LIB_TFLM_ENABLE) && PORTING_LIB_TFLM_ENABLE
 #ifndef TFLM_HPP
 #define TFLM_HPP
 
@@ -480,3 +481,5 @@ private:
 } // namespace porting
 
 #endif // TFLM_HPP
+
+#endif // PORTING_LIB_TFLM_ENABLE
