@@ -44,9 +44,8 @@ public:
 
     CmdStart()
         : Command("START", "Get device information and start the sample/invoke stream",
-              core::ConfigObjectMap {
-                  { "action", core::ConfigObject::createString("action",
-                                  "Choose streaming action: sample, invoke, stop_invoke, enable or disable") } })
+              core::ConfigObjectMap { CONFIG_OBJECT_DECL_STRING("action",
+                  "Choose streaming action: sample, invoke, stop_invoke, enable or disable", "") })
     {
         _rc = &rcCallback;
     }

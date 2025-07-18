@@ -427,6 +427,34 @@ ConfigMap fromConfigMap(const ConfigMap &config_map, const ConfigObjectMap &conf
 
 Status updateConfigObjectMap(ConfigObjectMap &config_objects, const ConfigMap &config_map);
 
+#if defined(CONFIG_OBJECT_DECL_INTEGER)
+#warning "Removing existing CONFIG_OBJECT_DECL_INTEGER"
+#undef CONFIG_OBJECT_DECL_INTEGER
+#endif
+#define CONFIG_OBJECT_DECL_INTEGER(name, description, default_value, min, max)                                         \
+    { name, core::ConfigObject::createInteger(name, description, default_value, min, max) }
+
+#if defined(CONFIG_OBJECT_DECL_FLOAT)
+#warning "Removing existing CONFIG_OBJECT_DECL_FLOAT"
+#undef CONFIG_OBJECT_DECL_FLOAT
+#endif
+#define CONFIG_OBJECT_DECL_FLOAT(name, description, default_value, min, max)                                           \
+    { name, core::ConfigObject::createFloat(name, description, default_value, min, max) }
+
+#if defined(CONFIG_OBJECT_DECL_BOOLEAN)
+#warning "Removing existing CONFIG_OBJECT_DECL_BOOLEAN"
+#undef CONFIG_OBJECT_DECL_BOOLEAN
+#endif
+#define CONFIG_OBJECT_DECL_BOOLEAN(name, description, default_value)                                                   \
+    { name, core::ConfigObject::createBoolean(name, description, default_value) }
+
+#if defined(CONFIG_OBJECT_DECL_STRING)
+#warning "Removing existing CONFIG_OBJECT_DECL_STRING"
+#undef CONFIG_OBJECT_DECL_STRING
+#endif
+#define CONFIG_OBJECT_DECL_STRING(name, description, default_value)                                                    \
+    { name, core::ConfigObject::createString(name, description, default_value) }
+
 } // namespace core
 
 #endif

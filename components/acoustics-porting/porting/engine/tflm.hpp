@@ -46,19 +46,18 @@ namespace porting {
 class EngineTFLM final: public hal::Engine
 {
 public:
-    static core::ConfigObjectMap DEFAULT_CONFIGS()
+    static inline core::ConfigObjectMap DEFAULT_CONFIGS() noexcept
     {
-        core::ConfigObjectMap configs;
-        configs.emplace("tensor_arena_size",
-            core::ConfigObject::createInteger("tensor_arena_size", "Size of tensor arena in bytes", 2048 * 1024,
-                512 * 1024, 4096 * 1024));
-        configs.emplace("model_lookup_step",
-            core::ConfigObject::createInteger("model_lookup_step", "Size of model lookup step in bytes", 1024 * 1024,
-                128 * 1024, 2048 * 1024));
+        static core::ConfigObjectMap configs { CONFIG_OBJECT_DECL_INTEGER("tensor_arena_size",
+                                                   "Size of tensor arena in bytes", 2048 * 1024, 512 * 1024,
+                                                   4096 * 1024),
+            CONFIG_OBJECT_DECL_INTEGER("model_lookup_step", "Size of model lookup step in bytes", 1024 * 1024,
+                128 * 1024, 2048 * 1024) };
+
         return configs;
     }
 
-    EngineTFLM() : Engine(Info(1, "TFLite Micro", Type::TFLiteMicro, { DEFAULT_CONFIGS() })) { }
+    EngineTFLM() noexcept : Engine(Info(1, "TFLite Micro", Type::TFLiteMicro, { DEFAULT_CONFIGS() })) { }
 
     ~EngineTFLM() override
     {

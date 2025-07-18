@@ -25,15 +25,11 @@ class SensorLIS3DHTR final: public Sensor
 public:
     static core::ConfigObjectMap DEFAULT_CONFIGS()
     {
-        core::ConfigObjectMap configs;
-
-        configs.emplace("sda", core::ConfigObject::createInteger("sda", "SDA pin number", 5, 1, 20));
-        configs.emplace("scl", core::ConfigObject::createInteger("scl", "SCL pin number", 6, 1, 20));
-        configs.emplace("fsr",
-            core::ConfigObject::createInteger("fsr", "Full scale range in G (2, 4, 8, 16)", 2, 2, 16));
-        configs.emplace("ord", core::ConfigObject::createInteger("ord",
-                                   "Output data rate in HZ (1, 10, 25, 50, 100, 200, 400)", 200, 1, 400));
-        configs.emplace("sr", core::ConfigObject::createInteger("sr", "Sample rate in Hz", 100, 1, 200));
+        static core::ConfigObjectMap configs { CONFIG_OBJECT_DECL_INTEGER("sda", "SDA pin number", 5, 1, 20),
+            CONFIG_OBJECT_DECL_INTEGER("scl", "SCL pin number", 6, 1, 20),
+            CONFIG_OBJECT_DECL_INTEGER("fsr", "Full scale range in G (2, 4, 8, 16)", 2, 2, 16),
+            CONFIG_OBJECT_DECL_INTEGER("ord", "Output data rate in HZ (1, 10, 25, 50, 100, 200, 400)", 200, 1, 400),
+            CONFIG_OBJECT_DECL_INTEGER("sr", "Sample rate in Hz", 100, 1, 200) };
 
         return configs;
     }
