@@ -7,9 +7,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <functional>
 #include <limits>
 #include <new>
+#include <type_traits>
 
 #include "core/encoder.hpp"
 
@@ -20,14 +20,10 @@ namespace encoder {
     class ASCII
     {
     public:
-        using ValueType = unsigned char;
-        using WriteCallback = std::function<int(const void *data, size_t size)>;
+        using ValueType = uint8_t;
 
         struct State final
         {
-            State() noexcept = default;
-
-            ~State() noexcept = default;
         };
     };
 
@@ -37,7 +33,8 @@ namespace encoder {
         {
         public:
             ASCIIBase64(void *buffer = nullptr, size_t buffer_size = 1024) noexcept
-                : _state(), _buffer(buffer), _buffer_size(buffer_size), _internal_buffer(false)
+                : Encoder((std::numeric_limits<int>::max() >> 2) * 3), _state(), _buffer(buffer),
+                  _buffer_size(buffer_size), _internal_buffer(false)
             {
                 if (!_buffer && _buffer_size >= 4)
                 {
@@ -60,20 +57,26 @@ namespace encoder {
                 }
             }
 
-            StateType state() const noexcept
+            State state() const noexcept
             {
                 return _state;
             }
 
-            int encode(const ValueType *data, size_t size, const WriteCallback &write_callback) noexcept
+            int encode(const ValueType *data, size_t size, std::nullptr_t) noexcept
             {
-                if (!data || size == 0 || size > std::numeric_limits<int>::max() || !write_callback) [[unlikely]]
+                return static_cast<int>((size + 2) / 3) << 2;
+            }
+
+            template<typename T, std::enable_if_t<std::is_invocable_r_v<int, T, const void *, size_t>, bool> = true>
+            int encode(const ValueType *data, size_t size, T &&write_callback) noexcept
+            {
+                if (!data || size == 0) [[unlikely]]
                 {
                     return -EINVAL;
                 }
                 if (!_buffer) [[unlikely]]
                 {
-                    return -ENOMEM;
+                    return -EFAULT;
                 }
 
                 uint8_t bytes[4];

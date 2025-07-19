@@ -7,9 +7,9 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <new>
+#include <type_traits>
 
 #include "core/encoder.hpp"
 
@@ -21,7 +21,6 @@ namespace encoder {
     {
     public:
         using ValueType = int16_t;
-        using WriteCallback = std::function<int(const void *data, size_t size)>;
 
         struct State final
         {
@@ -40,7 +39,8 @@ namespace encoder {
         {
         public:
             ADPCMIMA(void *buffer = nullptr, size_t buffer_size = 1024) noexcept
-                : _state(), _buffer(buffer), _buffer_size(buffer_size), _internal_buffer(false)
+                : Encoder((std::numeric_limits<int>::max() - 1) >> 1), _state(), _buffer(buffer),
+                  _buffer_size(buffer_size), _internal_buffer(false)
             {
                 if (!_buffer && _buffer_size > 0)
                 {
@@ -58,14 +58,20 @@ namespace encoder {
                 }
             }
 
-            StateType state() const noexcept
+            State state() const noexcept
             {
                 return _state;
             }
 
-            int encode(const ValueType *data, size_t size, const WriteCallback &write_callback) noexcept
+            int encode(const ValueType *data, size_t size, std::nullptr_t) noexcept
             {
-                if (!data || size == 0 || size > std::numeric_limits<int>::max() || !write_callback) [[unlikely]]
+                return static_cast<int>((size + 1) >> 1) << 1;
+            }
+
+            template<typename T, std::enable_if_t<std::is_invocable_r_v<int, T, const void *, size_t>, bool> = true>
+            int encode(const ValueType *data, size_t size, T &&write_callback) noexcept
+            {
+                if (!data || size == 0) [[unlikely]]
                 {
                     return -EINVAL;
                 }
@@ -74,7 +80,7 @@ namespace encoder {
                     return -ENOMEM;
                 }
 
-                size = (size >> 1) << 1;
+                size = ((size + 1) >> 1) << 1;
 
                 size_t p = 0;
                 for (size_t i = 0; i < size; ++i)
@@ -153,7 +159,7 @@ namespace encoder {
             }
 
         private:
-            StateType _state;
+            State _state;
             void *_buffer;
             size_t _buffer_size;
             bool _internal_buffer;
