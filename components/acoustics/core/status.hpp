@@ -32,7 +32,8 @@ public:
         return Status(0);
     }
 
-    inline Status(int code = 0, std::string &&message = "") noexcept : _code(code), _message(std::move(message))
+    inline constexpr Status(int code = 0, std::string &&message = "") noexcept
+        : _code(code), _message(std::move(message))
     {
         if (_code != 0 && _message.empty()) [[unlikely]]
         {

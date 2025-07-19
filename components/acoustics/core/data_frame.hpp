@@ -18,7 +18,7 @@ struct DataFrame final
     using Index = size_t;
     using DataType = T;
 
-    DataFrame() : timestamp(), index(0), data() { }
+    DataFrame() noexcept : timestamp(), index(0), data() { }
 
     ~DataFrame() = default;
 

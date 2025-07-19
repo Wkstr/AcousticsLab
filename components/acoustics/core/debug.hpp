@@ -8,7 +8,7 @@
 
 namespace core {
 
-inline void printHeapInfo(uint32_t caps = MALLOC_CAP_8BIT)
+inline void printHeapInfo(uint32_t caps = MALLOC_CAP_8BIT) noexcept
 {
     multi_heap_info_t heap_info;
     heap_caps_get_info(&heap_info, caps);

@@ -104,9 +104,9 @@ public:
 
     virtual core::Status updateConfig(const core::ConfigMap &configs) noexcept = 0;
 
-    virtual inline int available() const noexcept = 0;
-    virtual inline int read(void *data, size_t size) noexcept = 0;
-    virtual inline int write(const void *data, size_t size) noexcept = 0;
+    virtual inline size_t available() const noexcept = 0;
+    virtual inline size_t read(void *data, size_t size) noexcept = 0;
+    virtual inline size_t write(const void *data, size_t size) noexcept = 0;
 
     virtual inline int flush() noexcept = 0;
 
