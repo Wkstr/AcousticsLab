@@ -71,7 +71,7 @@ protected:
     }
 
 private:
-    static core::Status init(int console, hal::Transport *&console_ptr)
+    static core::Status init(int console, hal::Transport *&console_ptr) noexcept
     {
         auto status = STATUS_OK();
 

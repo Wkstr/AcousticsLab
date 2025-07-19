@@ -90,7 +90,7 @@ public:
         LOG(INFO, "API Server created with buffer size: %zu", _buffer_size);
     }
 
-    ~Server()
+    ~Server() noexcept
     {
         if (_buffer)
         {
