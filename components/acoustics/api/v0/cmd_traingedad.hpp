@@ -25,8 +25,8 @@ public:
     CmdTrainGEDAD()
         : Command("TRAINGEDAD", "Train the Gyroscope Euclidean Distance Anomaly Detection",
               core::ConfigObjectMap {
-                  { "action", core::ConfigObject::createString("action",
-                                  "Use 'train' to start train, 'save' to save the trained parameters to flash") },
+                  CONFIG_OBJECT_DECL_STRING("action",
+                      "Use 'train' to start training, 'save' to save the trained parameters to flash", ""),
               })
     {
     }

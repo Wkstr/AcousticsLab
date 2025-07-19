@@ -39,19 +39,18 @@ public:
         template<typename... Args,
             std::enable_if_t<(std::is_integral_v<std::remove_cvref_t<Args> > && ...), bool> = true>
         Shape(Args &&...dims) noexcept
-            : _dims({ static_cast<size_t>(std::forward<Args>(dims))... }), _size(sizeof...(Args)),
-              _dot((static_cast<size_t>(std::forward<Args>(dims)) * ...))
+            : _dims({ std::forward<Args>(dims)... }), _size(sizeof...(Args)), _dot((std::forward<Args>(dims) * ...))
         {
             _dims.shrink_to_fit();
         }
 
-        explicit Shape(const std::vector<size_t> &dims) noexcept
+        explicit Shape(const std::vector<int> &dims) noexcept
             : _dims(dims), _size(dims.size()), _dot(std::accumulate(dims.begin(), dims.end(), 1, std::multiplies<>()))
         {
             _dims.shrink_to_fit();
         }
 
-        explicit Shape(std::vector<size_t> &&dims) noexcept
+        explicit Shape(std::vector<int> &&dims) noexcept
             : _dims(std::move(dims)), _size(_dims.size()),
               _dot(std::accumulate(_dims.begin(), _dims.end(), 1, std::multiplies<>()))
         {
@@ -65,7 +64,7 @@ public:
             return _size;
         }
 
-        inline size_t operator[](size_t index) const noexcept
+        inline int operator[](size_t index) const noexcept
         {
             if (index >= _size) [[unlikely]]
             {
@@ -74,15 +73,15 @@ public:
             return _dims[index];
         }
 
-        inline size_t dot() const noexcept
+        inline int dot() const noexcept
         {
             return _dot;
         }
 
     private:
-        std::vector<size_t> _dims;
+        std::vector<int> _dims;
         size_t _size;
-        size_t _dot;
+        int _dot;
     };
 
     class QuantParams final
@@ -115,7 +114,7 @@ public:
         int32_t _zero_point;
     };
 
-    template<typename T = std::shared_ptr<Tensor>, typename P>
+    template<typename T = std::unique_ptr<Tensor>, typename P>
     [[nodiscard]] static T create(Type dtype, P &&shape, std::shared_ptr<std::byte[]> data = nullptr,
         size_t size = 0) noexcept
     {
@@ -164,7 +163,7 @@ public:
             }
         }
 
-        T ptr(new (std::nothrow) Tensor(dtype, dsize, std::forward<P>(shape), std::move(data), bytes_required));
+        T ptr { new (std::nothrow) Tensor(dtype, dsize, std::forward<P>(shape), std::move(data), bytes_required) };
         if (!ptr) [[unlikely]]
         {
             LOG(ERROR, "Failed to create Tensor, size: %zu bytes", sizeof(Tensor));
@@ -184,6 +183,11 @@ public:
     inline size_t dsize() const noexcept
     {
         return _dsize;
+    }
+
+    inline size_t size() const noexcept
+    {
+        return _size;
     }
 
     inline const Shape &shape() const noexcept
@@ -223,7 +227,11 @@ public:
     template<typename... Args>
     bool reshape(Args &&...dims) noexcept
     {
-        Shape new_shape(std::forward<Args>(dims)...);
+        return reshape(Shape(std::forward<Args>(dims)...));
+    }
+
+    bool reshape(const Shape &new_shape) noexcept
+    {
         if (new_shape.size() == 0 || new_shape.dot() == 0) [[unlikely]]
         {
             LOG(ERROR, "Invalid shape for reshaping, size: %zu, dot: %zu", new_shape.size(), new_shape.dot());

@@ -65,8 +65,8 @@ public:
         using ForwardCallback = std::function<core::Status(Graph &)>;
 
         template<typename T = std::shared_ptr<Graph>, typename... Args>
-        [[nodiscard]] static T create(int id, std::string name, std::vector<std::shared_ptr<Tensor>> &&inputs,
-            std::vector<std::shared_ptr<Tensor>> &&outputs, std::vector<Tensor::QuantParams> &&input_quant_params,
+        [[nodiscard]] static T create(int id, std::string name, std::vector<std::unique_ptr<Tensor>> &&inputs,
+            std::vector<std::unique_ptr<Tensor>> &&outputs, std::vector<Tensor::QuantParams> &&input_quant_params,
             std::vector<Tensor::QuantParams> &&output_quant_params, ForwardCallback &&forward_callback) noexcept
         {
             if (id < 0) [[unlikely]]
@@ -194,8 +194,8 @@ public:
         }
 
     private:
-        Graph(int id, std::string &&name, std::vector<std::shared_ptr<Tensor>> &&inputs,
-            std::vector<std::shared_ptr<Tensor>> &&outputs, std::vector<Tensor::QuantParams> &&input_quant_params,
+        Graph(int id, std::string &&name, std::vector<std::unique_ptr<Tensor>> &&inputs,
+            std::vector<std::unique_ptr<Tensor>> &&outputs, std::vector<Tensor::QuantParams> &&input_quant_params,
             std::vector<Tensor::QuantParams> &&output_quant_params, ForwardCallback &&forward_callback) noexcept
             : _id(id), _name(std::move(name)), _inputs(std::move(inputs)), _outputs(std::move(outputs)),
               _input_quant_params(std::move(input_quant_params)), _output_quant_params(std::move(output_quant_params)),
@@ -205,8 +205,8 @@ public:
 
         const int _id;
         const std::string _name;
-        std::vector<std::shared_ptr<Tensor>> _inputs;
-        std::vector<std::shared_ptr<Tensor>> _outputs;
+        std::vector<std::unique_ptr<Tensor>> _inputs;
+        std::vector<std::unique_ptr<Tensor>> _outputs;
         std::vector<Tensor::QuantParams> _input_quant_params;
         std::vector<Tensor::QuantParams> _output_quant_params;
 

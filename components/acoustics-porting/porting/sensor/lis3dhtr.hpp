@@ -23,24 +23,19 @@ using namespace hal;
 class SensorLIS3DHTR final: public Sensor
 {
 public:
-    static core::ConfigObjectMap DEFAULT_CONFIGS()
+    static inline core::ConfigObjectMap DEFAULT_CONFIGS() noexcept
     {
-        core::ConfigObjectMap configs;
-
-        configs.emplace("sda", core::ConfigObject::createInteger("sda", "SDA pin number", 5, 1, 20));
-        configs.emplace("scl", core::ConfigObject::createInteger("scl", "SCL pin number", 6, 1, 20));
-        configs.emplace("fsr",
-            core::ConfigObject::createInteger("fsr", "Full scale range in G (2, 4, 8, 16)", 2, 2, 16));
-        configs.emplace("ord", core::ConfigObject::createInteger("ord",
-                                   "Output data rate in HZ (1, 10, 25, 50, 100, 200, 400)", 200, 1, 400));
-        configs.emplace("sr", core::ConfigObject::createInteger("sr", "Sample rate in Hz", 100, 1, 200));
-
-        return configs;
+        return { CONFIG_OBJECT_DECL_INTEGER("sda", "SDA pin number", 5, 1, 20),
+            CONFIG_OBJECT_DECL_INTEGER("scl", "SCL pin number", 6, 1, 20),
+            CONFIG_OBJECT_DECL_INTEGER("fsr", "Full scale range in G (2, 4, 8, 16)", 2, 2, 16),
+            CONFIG_OBJECT_DECL_INTEGER("ord", "Output data rate in HZ (1, 10, 25, 50, 100, 200, 400)", 200, 1, 400),
+            CONFIG_OBJECT_DECL_INTEGER("sr", "Sample rate in Hz", 100, 1, 200) };
     }
 
-    SensorLIS3DHTR() : Sensor(Info(1, "LIS3DHTR Accelerometer", Type::Accelerometer, { DEFAULT_CONFIGS() })) { }
+    SensorLIS3DHTR() noexcept
+        : Sensor(Info(1, "LIS3DHTR Accelerometer", Type::Accelerometer, { DEFAULT_CONFIGS() })) { }
 
-    core::Status init() override
+    core::Status init() noexcept override
     {
         const std::lock_guard<std::mutex> lock(_lock);
 
@@ -187,7 +182,7 @@ public:
         return STATUS_OK();
     }
 
-    core::Status deinit() override
+    core::Status deinit() noexcept override
     {
         const std::lock_guard<std::mutex> lock(_lock);
 
@@ -246,7 +241,7 @@ public:
         return STATUS_OK();
     }
 
-    core::Status updateConfig(const core::ConfigMap &configs) override
+    core::Status updateConfig(const core::ConfigMap &configs) noexcept override
     {
         return STATUS(ENOTSUP, "Update config is not supported for LIS3DHTR sensor");
     }
@@ -277,8 +272,8 @@ public:
         return available;
     }
 
-    inline core::Status readDataFrame(core::DataFrame<std::shared_ptr<core::Tensor>> &data_frame,
-        size_t batch_size) override
+    inline core::Status readDataFrame(core::DataFrame<std::unique_ptr<core::Tensor>> &data_frame,
+        size_t batch_size) noexcept override
     {
         const std::lock_guard<std::mutex> lock(_lock);
 
@@ -326,8 +321,8 @@ public:
         data_frame.timestamp = std::chrono::steady_clock::now();
 
         batch_size = _buffer->read(reinterpret_cast<Data *>(_data_buffer.get()), batch_size);
-        data_frame.data = core::Tensor::create(core::Tensor::Type::Float32, core::Tensor::Shape(batch_size, 3),
-            _data_buffer, _data_buffer_capacity * sizeof(Data));
+        data_frame.data = core::Tensor::create(core::Tensor::Type::Float32,
+            core::Tensor::Shape(static_cast<int>(batch_size), 3), _data_buffer, _data_buffer_capacity * sizeof(Data));
 
         data_frame.index = _frame_index;
         _frame_index += batch_size;

@@ -20,7 +20,7 @@ namespace hal {
 
 class Transport;
 
-class TransportRegistry
+class TransportRegistry final
 {
 public:
     using TransportMap = std::unordered_map<int, Transport *>;
@@ -88,8 +88,8 @@ public:
 
     virtual ~Transport() = default;
 
-    virtual core::Status init() = 0;
-    virtual core::Status deinit() = 0;
+    virtual core::Status init() noexcept = 0;
+    virtual core::Status deinit() noexcept = 0;
 
     inline bool initialized() const noexcept
     {
@@ -102,13 +102,13 @@ public:
         return _info;
     }
 
-    virtual core::Status updateConfig(const core::ConfigMap &configs) = 0;
+    virtual core::Status updateConfig(const core::ConfigMap &configs) noexcept = 0;
 
-    virtual inline int available() const = 0;
-    virtual inline int read(void *data, size_t size) = 0;
-    virtual inline int write(const void *data, size_t size) = 0;
+    virtual inline int available() const noexcept = 0;
+    virtual inline int read(void *data, size_t size) noexcept = 0;
+    virtual inline int write(const void *data, size_t size) noexcept = 0;
 
-    virtual inline int flush() = 0;
+    virtual inline int flush() noexcept = 0;
 
     using ReadCallback = std::function<void(core::RingBuffer<std::byte> &, size_t)>;
     using ReadCondition = std::function<bool(const core::RingBuffer<std::byte> &)>;

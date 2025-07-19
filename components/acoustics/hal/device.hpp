@@ -18,7 +18,7 @@ namespace hal {
 
 class Device;
 
-class DeviceRegistry
+class DeviceRegistry final
 {
 public:
     DeviceRegistry() = default;
@@ -81,8 +81,8 @@ public:
 
     virtual ~Device() = default;
 
-    virtual core::Status init() = 0;
-    virtual core::Status deinit() = 0;
+    virtual core::Status init() noexcept = 0;
+    virtual core::Status deinit() noexcept = 0;
 
     inline bool initialized() const noexcept
     {
@@ -123,11 +123,11 @@ public:
         External,
     };
 
-    virtual core::Status store(StorageType where, std::string path, const void *data, size_t size) = 0;
-    virtual core::Status load(StorageType where, std::string path, void *data, size_t &size) = 0;
-    virtual core::Status exists(StorageType where, std::string path) = 0;
-    virtual core::Status remove(StorageType where, std::string path) = 0;
-    virtual core::Status erase(StorageType where) = 0;
+    virtual core::Status store(StorageType where, std::string path, const void *data, size_t size) noexcept = 0;
+    virtual core::Status load(StorageType where, std::string path, void *data, size_t &size) noexcept = 0;
+    virtual core::Status exists(StorageType where, std::string path) noexcept = 0;
+    virtual core::Status remove(StorageType where, std::string path) noexcept = 0;
+    virtual core::Status erase(StorageType where) noexcept = 0;
 
 protected:
     Device(Info &&info) noexcept : _info(std::move(info))
