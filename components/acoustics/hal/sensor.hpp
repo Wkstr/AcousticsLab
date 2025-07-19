@@ -112,7 +112,7 @@ public:
     virtual inline size_t dataAvailable() const noexcept = 0;
     virtual inline size_t dataClear() noexcept = 0;
 
-    virtual inline core::Status readDataFrame(core::DataFrame<std::shared_ptr<core::Tensor>> &data_frame,
+    virtual inline core::Status readDataFrame(core::DataFrame<std::unique_ptr<core::Tensor>> &data_frame,
         size_t batch_size)
         = 0;
 

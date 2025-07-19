@@ -331,8 +331,8 @@ private:
             return STATUS(EINVAL, "Model has no inputs or outputs");
         }
 
-        std::vector<std::shared_ptr<core::Tensor>> input_tensors(inputs_size);
-        std::vector<std::shared_ptr<core::Tensor>> output_tensors(outputs_size);
+        std::vector<std::unique_ptr<core::Tensor>> input_tensors(inputs_size);
+        std::vector<std::unique_ptr<core::Tensor>> output_tensors(outputs_size);
         std::vector<core::Tensor::QuantParams> input_quant_params(inputs_size);
         std::vector<core::Tensor::QuantParams> output_quant_params(outputs_size);
 

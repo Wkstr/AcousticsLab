@@ -272,7 +272,7 @@ public:
         return available;
     }
 
-    inline core::Status readDataFrame(core::DataFrame<std::shared_ptr<core::Tensor>> &data_frame,
+    inline core::Status readDataFrame(core::DataFrame<std::unique_ptr<core::Tensor>> &data_frame,
         size_t batch_size) override
     {
         const std::lock_guard<std::mutex> lock(_lock);
@@ -321,8 +321,8 @@ public:
         data_frame.timestamp = std::chrono::steady_clock::now();
 
         batch_size = _buffer->read(reinterpret_cast<Data *>(_data_buffer.get()), batch_size);
-        data_frame.data = core::Tensor::create(core::Tensor::Type::Float32, core::Tensor::Shape(batch_size, 3),
-            _data_buffer, _data_buffer_capacity * sizeof(Data));
+        data_frame.data = core::Tensor::create(core::Tensor::Type::Float32,
+            core::Tensor::Shape(static_cast<int>(batch_size), 3), _data_buffer, _data_buffer_capacity * sizeof(Data));
 
         data_frame.index = _frame_index;
         _frame_index += batch_size;

@@ -101,7 +101,7 @@ public:
             }
 
             {
-                core::DataFrame<std::shared_ptr<core::Tensor>> data_frame;
+                core::DataFrame<std::unique_ptr<core::Tensor>> data_frame;
                 auto status = _sensor->readDataFrame(data_frame, available);
                 if (!status) [[unlikely]]
                 {
