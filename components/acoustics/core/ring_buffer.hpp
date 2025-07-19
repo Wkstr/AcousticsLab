@@ -13,6 +13,7 @@
 #include <memory>
 #include <new>
 #include <type_traits>
+#include <utility>
 
 namespace core {
 
@@ -123,7 +124,8 @@ public:
         return _buffer;
     }
 
-    inline size_t put(const T &value, bool try_overwrite = true) noexcept
+    template<typename P, std::enable_if_t<std::is_same_v<std::remove_cvref_t<P>, T>, bool> = true>
+    inline size_t put(P &&value, bool try_overwrite = true) noexcept
     {
         size_t head = _head.load(std::memory_order_relaxed);
         size_t tail = _tail.load(std::memory_order_acquire);
@@ -148,7 +150,7 @@ public:
             }
         }
 
-        *ptr = value;
+        *ptr = std::forward<P>(value);
 
         return _head.compare_exchange_strong(head, next_head, std::memory_order_release, std::memory_order_relaxed) ? 1
                                                                                                                     : 0;

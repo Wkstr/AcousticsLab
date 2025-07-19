@@ -343,7 +343,7 @@ public:
 protected:
     static void timerCallback(TimerHandle_t xTimer) noexcept
     {
-        if (!_this || !_this->_lis3dhtr || !_this->_buffer)
+        if (!_this || !_this->_lis3dhtr || !_this->_buffer) [[unlikely]]
         {
             LOG(ERROR, "Timer callback called with invalid state");
             return;
@@ -358,8 +358,7 @@ protected:
             return;
         }
 
-        Data data = { x, y, z };
-        if (!_this->_buffer->put(data)) [[unlikely]]
+        if (!_this->_buffer->put(Data { x, y, z })) [[unlikely]]
         {
             LOG(ERROR, "Failed to push data to buffer");
             _this->_sensor_status = ENOMEM;
