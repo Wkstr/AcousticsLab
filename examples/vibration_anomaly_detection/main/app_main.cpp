@@ -8,7 +8,6 @@
 #include "api/executor.hpp"
 #include "api/server.hpp"
 
-#include "hal/device.hpp"
 #include "hal/transport.hpp"
 
 #if LOG_LEVEL >= LOG_LEVEL_DEBUG
@@ -21,6 +20,7 @@
 #define EXECUTOR_TASK_STACK_SIZE     20480
 #define EXECUTOR_TASK_PRIORITY       3
 #define EXECUTOR_TASK_NAME           "Executor"
+#define EXECUTOR_TASK_TIMEOUT_MS     10000
 #define EXECUTOR_TASK_PIN_TO_CORE    1
 #define EXECUTOR_TASK_ROUND_DELAY_MS 1
 
@@ -55,6 +55,19 @@ static void executor_task(void *)
     {
         LOG(ERROR, "Failed to add task to watchdog: %d", ret);
     }
+
+    static esp_task_wdt_config_t wdt_config = {
+        .timeout_ms = EXECUTOR_TASK_TIMEOUT_MS,
+        .idle_core_mask = 1 << EXECUTOR_TASK_PIN_TO_CORE,
+        .trigger_panic = false,
+    };
+    ret = esp_task_wdt_reconfigure(&wdt_config);
+    if (ret != ESP_OK) [[unlikely]]
+    {
+        LOG(WARNING, "Failed to reconfigure task watchdog: %d", ret);
+    }
+
+    executor_yield();
 
     while (true)
     {
@@ -110,7 +123,7 @@ extern "C" void app_main()
 
     LOG(INFO, "Initializing API Server");
     auto server = api::Server(*context_instance, executor, SERVER_COMMAND_BUFFER_SIZE);
-    auto stop_token = [](const core::Status &status) -> bool {
+    auto stop_token = [](const core::Status &status) noexcept -> bool {
         if (!status)
         {
             LOG(DEBUG, "Server stop token triggered: %d, %s", status.code(), status.message().c_str());
