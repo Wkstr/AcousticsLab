@@ -35,7 +35,7 @@ public:
     SensorLIS3DHTR() noexcept
         : Sensor(Info(1, "LIS3DHTR Accelerometer", Type::Accelerometer, { DEFAULT_CONFIGS() })) { }
 
-    core::Status init() override
+    core::Status init() noexcept override
     {
         const std::lock_guard<std::mutex> lock(_lock);
 
@@ -182,7 +182,7 @@ public:
         return STATUS_OK();
     }
 
-    core::Status deinit() override
+    core::Status deinit() noexcept override
     {
         const std::lock_guard<std::mutex> lock(_lock);
 
@@ -241,7 +241,7 @@ public:
         return STATUS_OK();
     }
 
-    core::Status updateConfig(const core::ConfigMap &configs) override
+    core::Status updateConfig(const core::ConfigMap &configs) noexcept override
     {
         return STATUS(ENOTSUP, "Update config is not supported for LIS3DHTR sensor");
     }
@@ -273,7 +273,7 @@ public:
     }
 
     inline core::Status readDataFrame(core::DataFrame<std::unique_ptr<core::Tensor>> &data_frame,
-        size_t batch_size) override
+        size_t batch_size) noexcept override
     {
         const std::lock_guard<std::mutex> lock(_lock);
 

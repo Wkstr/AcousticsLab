@@ -85,7 +85,7 @@ public:
         }
     }
 
-    core::Status init() override
+    core::Status init() noexcept override
     {
         const std::lock_guard<std::mutex> lock(_lock);
 
@@ -146,14 +146,14 @@ public:
         return STATUS_OK();
     }
 
-    core::Status deinit() override
+    core::Status deinit() noexcept override
     {
         const std::lock_guard<std::mutex> lock(_lock);
 
         return internalDeInit();
     }
 
-    core::Status updateConfig(const core::ConfigMap &configs) override
+    core::Status updateConfig(const core::ConfigMap &configs) noexcept override
     {
         return STATUS(ENOTSUP, "Update config is not supported for UART transport");
     }
@@ -443,7 +443,7 @@ private:
         }
 
         auto graph = core::Model::Graph::create(0, "", std::move(input_tensors), std::move(output_tensors),
-            std::move(input_quant_params), std::move(output_quant_params), [this](core::Model::Graph &graph) {
+            std::move(input_quant_params), std::move(output_quant_params), [this](core::Model::Graph &graph) noexcept {
                 const std::lock_guard<std::mutex> lock(this->_lock);
 
                 if (!this->_interpreter) [[unlikely]]

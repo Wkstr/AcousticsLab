@@ -22,7 +22,7 @@ namespace hal {
 
 class Engine;
 
-class EngineRegistry
+class EngineRegistry final
 {
 public:
     using EngineMap = std::unordered_map<int, Engine *>;
@@ -94,8 +94,8 @@ public:
 
     virtual ~Engine() = default;
 
-    virtual core::Status init() = 0;
-    virtual core::Status deinit() = 0;
+    virtual core::Status init() noexcept = 0;
+    virtual core::Status deinit() noexcept = 0;
 
     inline bool initialized() const noexcept
     {
@@ -108,7 +108,7 @@ public:
         return _info;
     }
 
-    virtual core::Status updateConfig(const core::ConfigMap &configs) = 0;
+    virtual core::Status updateConfig(const core::ConfigMap &configs) noexcept = 0;
 
     const std::vector<std::shared_ptr<core::Model::Info>> &modelInfos() const noexcept
     {

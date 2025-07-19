@@ -19,7 +19,7 @@ namespace hal {
 
 class Sensor;
 
-class SensorRegistry
+class SensorRegistry final
 {
 public:
     using SensorMap = std::unordered_map<int, Sensor *>;
@@ -93,8 +93,8 @@ public:
 
     virtual ~Sensor() = default;
 
-    virtual core::Status init() = 0;
-    virtual core::Status deinit() = 0;
+    virtual core::Status init() noexcept = 0;
+    virtual core::Status deinit() noexcept = 0;
 
     inline bool initialized() const noexcept
     {
@@ -107,13 +107,13 @@ public:
         return _info;
     }
 
-    virtual core::Status updateConfig(const core::ConfigMap &configs) = 0;
+    virtual core::Status updateConfig(const core::ConfigMap &configs) noexcept = 0;
 
     virtual inline size_t dataAvailable() const noexcept = 0;
     virtual inline size_t dataClear() noexcept = 0;
 
     virtual inline core::Status readDataFrame(core::DataFrame<std::unique_ptr<core::Tensor>> &data_frame,
-        size_t batch_size)
+        size_t batch_size) noexcept
         = 0;
 
 protected:

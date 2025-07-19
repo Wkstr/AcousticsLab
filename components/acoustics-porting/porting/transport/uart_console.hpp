@@ -34,7 +34,7 @@ public:
 
     TransportUARTConsole() noexcept : Transport(Info(1, "UART Console", Type::UART, { DEFAULT_CONFIGS() })) { }
 
-    core::Status init() override
+    core::Status init() noexcept override
     {
         if (_info.status != Status::Uninitialized)
         {
@@ -69,7 +69,7 @@ public:
         return STATUS_OK();
     }
 
-    core::Status deinit() override
+    core::Status deinit() noexcept override
     {
         if (_info.status <= Status::Uninitialized)
         {
@@ -98,12 +98,12 @@ public:
         return STATUS_OK();
     }
 
-    core::Status updateConfig(const core::ConfigMap &configs) override
+    core::Status updateConfig(const core::ConfigMap &configs) noexcept override
     {
         return STATUS(ENOTSUP, "Update config is not supported for UART transport");
     }
 
-    inline int available() const override
+    inline int available() const noexcept override
     {
         if (!_rx_buffer) [[unlikely]]
         {
@@ -123,7 +123,7 @@ public:
         return _rx_buffer->size();
     }
 
-    inline int read(void *data, size_t size) override
+    inline int read(void *data, size_t size) noexcept override
     {
         if (!_rx_buffer) [[unlikely]]
         {
@@ -140,7 +140,7 @@ public:
         return _rx_buffer->read(reinterpret_cast<std::byte *>(data), size);
     }
 
-    inline int write(const void *data, size_t size) override
+    inline int write(const void *data, size_t size) noexcept override
     {
         if (!initialized()) [[unlikely]]
         {
@@ -168,7 +168,7 @@ public:
         return written;
     }
 
-    inline int flush() override
+    inline int flush() noexcept override
     {
         return fsync(fileno(stdout));
     }
