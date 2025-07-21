@@ -161,18 +161,18 @@ public:
     virtual core::Status loadModel(const std::shared_ptr<core::Model::Info> &info,
         std::shared_ptr<core::Model> &model) noexcept override
     {
+        if (!info) [[unlikely]]
+        {
+            LOG(ERROR, "Model info is null");
+            return STATUS(EINVAL, "Model info is null");
+        }
+
         const std::lock_guard<std::mutex> lock(_lock);
 
         if (_info.status < Status::Idle) [[unlikely]]
         {
             LOG(ERROR, "Engine is not initialized or in an invalid state");
             return STATUS(ENXIO, "Engine is not initialized or in an invalid state");
-        }
-
-        if (!info) [[unlikely]]
-        {
-            LOG(ERROR, "Model info is null");
-            return STATUS(EINVAL, "Model info is null");
         }
 
         if (_interpreter) [[unlikely]]
@@ -303,7 +303,7 @@ private:
         const size_t partition_size = _partition->size;
         const size_t lookup_step = _info.configs["model_lookup_step"].getValue<int>();
 
-        for (size_t i = 0; i < partition_size; i += lookup_step)
+        for (size_t i = 0, id = 0; i < partition_size; i += lookup_step)
         {
             const void *data = static_cast<const uint8_t *>(_mmap_ptr) + i;
             if (__builtin_bswap32(*(static_cast<const uint32_t *>(data) + 1)) != 0x54464C33)
@@ -313,8 +313,9 @@ private:
 
             LOG(INFO, "Found TFLite model at offset %zu, address %p", i, data);
 
-            _model_infos.emplace_back(std::make_shared<core::Model::Info>(core::Model::Type::TFLite,
-                std::string("Model_") + std::to_string(i), "TFL3", std::unordered_map<int, std::string> {}, data));
+            _model_infos.emplace_back(
+                std::make_shared<core::Model::Info>(static_cast<int>(++id), std::string("Model_") + std::to_string(i),
+                    core::Model::Type::TFLite, "TFL3", std::unordered_map<int, std::string> {}, data));
         }
 
         return STATUS_OK();

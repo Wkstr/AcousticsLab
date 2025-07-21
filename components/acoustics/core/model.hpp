@@ -35,19 +35,20 @@ public:
 
     struct Info final
     {
-        Info(Type type, std::string name, std::string version, std::unordered_map<int, std::string> &&labels,
+        Info(int id, std::string name, Type type, std::string version, std::unordered_map<int, std::string> &&labels,
             std::variant<std::string, const void *> location) noexcept
-            : type(type), name(std::move(name)), version(std::move(version)), labels(std::move(labels)),
+            : id(id), name(std::move(name)), type(type), version(std::move(version)), labels(std::move(labels)),
               location(std::move(location))
         {
         }
 
         ~Info() = default;
 
-        const Type type;
+        const int id;
         const std::string name;
+        const Type type;
         const std::string version;
-        const std::unordered_map<int, std::string> labels;
+        std::unordered_map<int, std::string> labels;
         const std::variant<std::string, const void *> location;
     };
 

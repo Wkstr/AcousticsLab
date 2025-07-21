@@ -12,11 +12,13 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <forward_list>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
-#include <vector>
+#include <utility>
 
 namespace hal {
 
@@ -110,38 +112,27 @@ public:
 
     virtual core::Status updateConfig(const core::ConfigMap &configs) noexcept = 0;
 
-    const std::vector<std::shared_ptr<core::Model::Info>> &modelInfos() const noexcept
+    const std::forward_list<std::shared_ptr<core::Model::Info>> &modelInfos() const noexcept
     {
         return _model_infos;
     }
 
-    std::shared_ptr<core::Model::Info> modelInfo(const std::string &name) const noexcept
+    template<typename T, std::enable_if<std::is_invocable_r_v<bool, T, const core::Model::Info &>, bool> = true>
+    std::shared_ptr<core::Model::Info> modelInfo(T &&pred) const noexcept
     {
-        for (const auto &model_info: _model_infos)
+        auto it = std::find_if(_model_infos.begin(), _model_infos.end(),
+            [pred = std::forward<T>(pred)](
+                const std::shared_ptr<core::Model::Info> &info) mutable { return info ? pred(*info) : false; });
+        if (it != _model_infos.end()) [[likely]]
         {
-            if (model_info && model_info->name == name)
-            {
-                return model_info;
-            }
+            return *it;
         }
-        LOG(ERROR, "Model info with name '%s' not found", name.data());
-        return nullptr;
+        return {};
     }
 
     virtual core::Status loadModel(const std::shared_ptr<core::Model::Info> &info,
         std::shared_ptr<core::Model> &model) noexcept
         = 0;
-
-    const core::Status loadModel(const std::string &name, std::shared_ptr<core::Model> &model) noexcept
-    {
-        const auto &model_info = modelInfo(name);
-        if (!model_info) [[unlikely]]
-        {
-            LOG(ERROR, "Model info with name '%s' not found", name.data());
-            return STATUS(EINVAL, "Model info not found");
-        }
-        return loadModel(model_info, model);
-    }
 
 protected:
     Engine(Info &&info) noexcept : _info(std::move(info))
@@ -161,7 +152,7 @@ protected:
 
     mutable Info _info;
 
-    std::vector<std::shared_ptr<core::Model::Info>> _model_infos;
+    std::forward_list<std::shared_ptr<core::Model::Info>> _model_infos;
 };
 
 } // namespace hal
