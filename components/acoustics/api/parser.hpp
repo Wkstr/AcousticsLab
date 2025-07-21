@@ -91,7 +91,6 @@ public:
             return STATUS_OK();
         }
 
-
         size_t arg_index = 0;
         std::string arg = "";
         for (size_t i = 0; i < cmd_suffix.size() && arg_index < n_args; ++i)
@@ -103,7 +102,7 @@ public:
                 config_objects[_args_index[arg_index++]] = arg;
                 arg.clear();
             }
-            else if (c == '\\')
+            else if (c == '\\') [[unlikely]]
             {
                 if (++i >= cmd_suffix.size()) [[unlikely]]
                 {
@@ -111,7 +110,7 @@ public:
                 }
                 arg += cmd_suffix[i];
             }
-            else
+            else [[likely]]
             {
                 arg += c;
             }

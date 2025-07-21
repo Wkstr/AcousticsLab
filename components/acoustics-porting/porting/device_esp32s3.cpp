@@ -32,7 +32,7 @@
 
 namespace porting {
 
-static const char *getDeviceID()
+static const char *getDeviceID() noexcept
 {
     char id_full[16];
     int ret = esp_efuse_read_field_blob(ESP_EFUSE_OPTIONAL_UNIQUE_ID, id_full, 16u << 3);
@@ -49,7 +49,7 @@ static const char *getDeviceID()
     return id_str;
 }
 
-static size_t getFreeMemorySize()
+static size_t getFreeMemorySize() noexcept
 {
     multi_heap_info_t heap_info;
     heap_caps_get_info(&heap_info, MALLOC_CAP_8BIT);
@@ -70,7 +70,7 @@ static constexpr const int GPIO_PINS[] = { 1, 2, 3, 21, 41, 42 };
 class DeviceESP32S3 final: public hal::Device
 {
 public:
-    DeviceESP32S3()
+    DeviceESP32S3() noexcept
         : Device(Info(getDeviceID(), DEVICE_MODEL, DEVICE_VERSION, DEVICE_MEMORY_SIZE, DEVICE_NAME, 0,
               std::chrono::system_clock::now(), getFreeMemorySize())),
           _storage_lfs_mutex(), _storage_lfs_flashbd_config(), _storage_lfs_flashbd(), _storage_lfs_config(),
@@ -85,7 +85,7 @@ public:
         }
     }
 
-    core::Status init() override
+    core::Status init() noexcept override
     {
         LOG(INFO, "Initializing ESP32-S3 device");
         if (initialized())
@@ -145,7 +145,7 @@ public:
         return STATUS_OK();
     }
 
-    core::Status deinit() override
+    core::Status deinit() noexcept override
     {
         LOG(INFO, "Deinitializing ESP32-S3 device");
 
@@ -204,7 +204,7 @@ public:
         }
     }
 
-    core::Status store(StorageType where, std::string path, const void *data, size_t size) override
+    core::Status store(StorageType where, std::string path, const void *data, size_t size) noexcept override
     {
         if (!initialized()) [[unlikely]]
         {
@@ -221,7 +221,7 @@ public:
         return STATUS(ENOTSUP, "Unsupported storage type for store operation");
     }
 
-    core::Status load(StorageType where, std::string path, void *data, size_t &size) override
+    core::Status load(StorageType where, std::string path, void *data, size_t &size) noexcept override
     {
         if (!initialized()) [[unlikely]]
         {
@@ -238,7 +238,7 @@ public:
         return STATUS(ENOTSUP, "Unsupported storage type for load operation");
     }
 
-    core::Status exists(StorageType where, std::string path) override
+    core::Status exists(StorageType where, std::string path) noexcept override
     {
         if (!initialized()) [[unlikely]]
         {
@@ -255,7 +255,7 @@ public:
         return STATUS(ENOTSUP, "Unsupported storage type for exists operation");
     }
 
-    core::Status remove(StorageType where, std::string path) override
+    core::Status remove(StorageType where, std::string path) noexcept override
     {
         if (!initialized()) [[unlikely]]
         {
@@ -272,7 +272,7 @@ public:
         return STATUS(ENOTSUP, "Unsupported storage type for remove operation");
     }
 
-    core::Status erase(StorageType where) override
+    core::Status erase(StorageType where) noexcept override
     {
         if (!initialized()) [[unlikely]]
         {
@@ -323,7 +323,7 @@ private:
         return true;
     }
 
-    core::Status initLittleFS()
+    core::Status initLittleFS() noexcept
     {
         const auto guard = std::lock_guard<std::mutex>(_storage_lfs_mutex);
 
@@ -414,7 +414,7 @@ private:
         return STATUS_OK();
     }
 
-    core::Status deinitLittleFS()
+    core::Status deinitLittleFS() noexcept
     {
         const auto guard = std::lock_guard<std::mutex>(_storage_lfs_mutex);
 
@@ -445,7 +445,7 @@ private:
         return STATUS_OK();
     }
 
-    static std::list<std::string> pathToParts(const std::string &path)
+    static std::list<std::string> pathToParts(const std::string &path) noexcept
     {
         std::list<std::string> parts;
         size_t pos = 0;
@@ -465,7 +465,7 @@ private:
         return parts;
     }
 
-    core ::Status storeToLittleFS(const std::string &path, const void *data, size_t size)
+    core ::Status storeToLittleFS(const std::string &path, const void *data, size_t size) noexcept
     {
         const auto guard = std::lock_guard<std::mutex>(_storage_lfs_mutex);
 
@@ -524,7 +524,7 @@ private:
         return STATUS_OK();
     }
 
-    core::Status loadFromLittleFS(const std::string &path, void *data, size_t &size)
+    core::Status loadFromLittleFS(const std::string &path, void *data, size_t &size) noexcept
     {
         const auto guard = std::lock_guard<std::mutex>(_storage_lfs_mutex);
 
@@ -579,7 +579,7 @@ private:
         return STATUS_OK();
     }
 
-    core::Status existsInLittleFS(const std::string &path)
+    core::Status existsInLittleFS(const std::string &path) noexcept
     {
         const auto guard = std::lock_guard<std::mutex>(_storage_lfs_mutex);
 
@@ -598,7 +598,7 @@ private:
         return STATUS(EIO, "Failed to check file existence");
     }
 
-    core::Status removeFromLittleFS(const std::string &path)
+    core::Status removeFromLittleFS(const std::string &path) noexcept
     {
         const auto guard = std::lock_guard<std::mutex>(_storage_lfs_mutex);
 
@@ -611,7 +611,7 @@ private:
         return STATUS_OK();
     }
 
-    core::Status eraseLittleFS()
+    core::Status eraseLittleFS() noexcept
     {
         const auto guard = std::lock_guard<std::mutex>(_storage_lfs_mutex);
 

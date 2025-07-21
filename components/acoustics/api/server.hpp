@@ -90,7 +90,7 @@ public:
         LOG(INFO, "API Server created with buffer size: %zu", _buffer_size);
     }
 
-    ~Server()
+    ~Server() noexcept
     {
         if (_buffer)
         {
@@ -120,19 +120,16 @@ public:
         {
             for (const auto &[id, transport]: _transports)
             {
-                _read_status = STATUS_OK();
-                const auto status
-                    = transport->readIf(std::bind(&Server::transportReadCallback, this, std::ref(*transport),
-                                            std::placeholders::_1, std::placeholders::_2),
-                        std::bind(&Server::transportReadCondition, this, std::placeholders::_1));
-                if (!status) [[unlikely]]
-                {
-                    _read_status = status;
-                }
-                if (!_read_status)
+                _read_status = transport->readIf(std::bind(&Server::transportReadCallback, this, std::ref(*transport),
+                                                     std::placeholders::_1, std::placeholders::_2),
+                    std::bind(&Server::transportReadCondition, this, std::placeholders::_1));
+                if (!_read_status) [[unlikely]]
                 {
                     LOG(DEBUG, "Transport ID=%d read status: %s", id, _read_status.message().c_str());
-                    break;
+                    if (stop_token(_read_status))
+                    {
+                        return _read_status;
+                    }
                 }
             }
         }

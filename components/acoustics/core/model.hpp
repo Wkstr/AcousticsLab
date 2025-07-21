@@ -15,6 +15,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace core {
@@ -34,20 +35,21 @@ public:
 
     struct Info final
     {
-        Info(Type type, std::string name, std::string version, std::unordered_map<int, std::string> &&labels,
-            std::string path)
-            : type(type), name(std::move(name)), version(std::move(version)), labels(std::move(labels)),
-              path(std::move(path))
+        Info(int id, std::string name, Type type, std::string version, std::unordered_map<int, std::string> &&labels,
+            std::variant<std::string, const void *> location) noexcept
+            : id(id), name(std::move(name)), type(type), version(std::move(version)), labels(std::move(labels)),
+              location(std::move(location))
         {
         }
 
         ~Info() = default;
 
-        const Type type;
+        const int id;
         const std::string name;
+        const Type type;
         const std::string version;
-        const std::unordered_map<int, std::string> labels;
-        const std::string path;
+        std::unordered_map<int, std::string> labels;
+        const std::variant<std::string, const void *> location;
     };
 
     struct Reporter final
@@ -63,41 +65,48 @@ public:
     public:
         using ForwardCallback = std::function<core::Status(Graph &)>;
 
-        Graph(int id, std::string name, std::vector<std::shared_ptr<Tensor>> &&inputs,
-            std::vector<std::shared_ptr<Tensor>> &&outputs, std::vector<Tensor::QuantParams> &&input_quant_params,
-            std::vector<Tensor::QuantParams> &&output_quant_params,
-            ForwardCallback &&forward_callback = nullptr) noexcept
-            : _id(id), _name(std::move(name)), _inputs(std::move(inputs)), _outputs(std::move(outputs)),
-              _input_quant_params(std::move(input_quant_params)), _output_quant_params(std::move(output_quant_params)),
-              _forward_callback(std::move(forward_callback))
+        template<typename T = std::shared_ptr<Graph>, typename... Args>
+        [[nodiscard]] static T create(int id, std::string name, std::vector<std::unique_ptr<Tensor>> &&inputs,
+            std::vector<std::unique_ptr<Tensor>> &&outputs, std::vector<Tensor::QuantParams> &&input_quant_params,
+            std::vector<Tensor::QuantParams> &&output_quant_params, ForwardCallback &&forward_callback) noexcept
         {
-            if (_id < 0) [[unlikely]]
+            if (id < 0) [[unlikely]]
             {
-                LOG(WARNING, "Graph ID is negative: %d", _id);
+                LOG(ERROR, "Graph ID is negative: %d", id);
+                return {};
             }
-            if (_name.empty()) [[unlikely]]
+            if (name.empty()) [[unlikely]]
             {
-                _name = std::string("Graph_") + std::to_string(_id);
-                LOG(INFO, "Graph name is empty, using default name: '%s'", _name.c_str());
+                name = std::string("Graph_") + std::to_string(id);
+                LOG(WARNING, "Graph name is empty, using default name: '%s'", name.c_str());
             }
-            if (_inputs.empty()) [[unlikely]]
+            if (inputs.empty()) [[unlikely]]
             {
-                LOG(ERROR, "Graph '%s' has no inputs", this->_name.c_str());
+                LOG(ERROR, "Graph '%s' has no inputs", name.c_str());
+                return {};
             }
-            if (_outputs.empty()) [[unlikely]]
+            if (outputs.empty()) [[unlikely]]
             {
-                LOG(ERROR, "Graph '%s' has no outputs", this->_name.c_str());
+                LOG(ERROR, "Graph '%s' has no outputs", name.c_str());
+                return {};
             }
-            if (_input_quant_params.size() != _inputs.size()) [[unlikely]]
+            if (input_quant_params.size() != inputs.size()) [[unlikely]]
             {
-                LOG(WARNING, "Graph '%s' input quantization parameters size mismatch: %zu != %zu", this->_name.c_str(),
-                    _input_quant_params.size(), _inputs.size());
+                LOG(WARNING, "Graph '%s' input quantization parameters size mismatch: %zu != %zu", name.c_str(),
+                    input_quant_params.size(), inputs.size());
             }
-            if (_output_quant_params.size() != _outputs.size()) [[unlikely]]
+            if (output_quant_params.size() != outputs.size()) [[unlikely]]
             {
-                LOG(WARNING, "Graph '%s' output quantization parameters size mismatch: %zu != %zu", this->_name.c_str(),
-                    _output_quant_params.size(), _outputs.size());
+                LOG(WARNING, "Graph '%s' output quantization parameters size mismatch: %zu != %zu", name.c_str(),
+                    output_quant_params.size(), outputs.size());
             }
+            if (!forward_callback) [[unlikely]]
+            {
+                LOG(ERROR, "Graph '%s' has no forward callback", name.c_str());
+                return {};
+            }
+            return T { new Graph(id, std::move(name), std::move(inputs), std::move(outputs),
+                std::move(input_quant_params), std::move(output_quant_params), std::move(forward_callback)) };
         }
 
         Graph(const Graph &other) = delete;
@@ -172,11 +181,6 @@ public:
 
         inline core::Status forward() noexcept
         {
-            if (!_forward_callback) [[unlikely]]
-            {
-                LOG(ERROR, "Graph '%s' has no forward callback", _name.c_str());
-                return STATUS(EFAULT, "Graph forward callback is not set");
-            }
             return _forward_callback(*this);
         }
 
@@ -191,33 +195,35 @@ public:
         }
 
     private:
+        Graph(int id, std::string &&name, std::vector<std::unique_ptr<Tensor>> &&inputs,
+            std::vector<std::unique_ptr<Tensor>> &&outputs, std::vector<Tensor::QuantParams> &&input_quant_params,
+            std::vector<Tensor::QuantParams> &&output_quant_params, ForwardCallback &&forward_callback) noexcept
+            : _id(id), _name(std::move(name)), _inputs(std::move(inputs)), _outputs(std::move(outputs)),
+              _input_quant_params(std::move(input_quant_params)), _output_quant_params(std::move(output_quant_params)),
+              _forward_callback(std::move(forward_callback))
+        {
+        }
+
         const int _id;
-        std::string _name;
-        std::vector<std::shared_ptr<Tensor>> _inputs;
-        std::vector<std::shared_ptr<Tensor>> _outputs;
+        const std::string _name;
+        std::vector<std::unique_ptr<Tensor>> _inputs;
+        std::vector<std::unique_ptr<Tensor>> _outputs;
         std::vector<Tensor::QuantParams> _input_quant_params;
         std::vector<Tensor::QuantParams> _output_quant_params;
 
         ForwardCallback _forward_callback;
     };
 
-    Model(std::shared_ptr<Info> info, std::vector<std::shared_ptr<Graph>> &&graphs, void *data = nullptr,
-        size_t size = 0, bool internal_managed = false) noexcept
-        : _info(std::move(info)), _graphs(std::move(graphs)), _data(data), _size(size),
-          _internal_managed(internal_managed)
+    template<typename T>
+    Model(T &&info, std::vector<std::shared_ptr<Graph>> &&graphs) noexcept
+        : _info(std::forward<T>(info)), _graphs(std::move(graphs))
     {
-        if (!_info) [[unlikely]]
-        {
-            LOG(ERROR, "Model info is null");
-        }
-        if (_graphs.empty()) [[unlikely]]
-        {
-            LOG(ERROR, "Model '%s' has no graphs", _info->name.c_str());
-        }
-        if (_data && _size > 0) [[unlikely]]
-        {
-            LOG(ERROR, "Model '%s' has non-zero size (%zu) but no data", _info->name.c_str(), _size);
-        }
+    }
+
+    template<typename T>
+    Model(T &&info, std::shared_ptr<Graph> &&graph) noexcept
+        : _info(std::forward<T>(info)), _graphs({ std::move(graph) })
+    {
     }
 
     Model(const Model &other) = delete;
@@ -228,13 +234,9 @@ public:
 
     ~Model() noexcept
     {
-        if (_data && _internal_managed)
-        {
-            delete[] static_cast<std::byte *>(_data);
-            _data = nullptr;
-            _size = 0;
-            LOG(DEBUG, "Model '%s' data memory released", _info->name.c_str());
-        }
+        LOG(INFO, "Destroying model '%s'", _info->name.c_str());
+        _graphs.clear();
+        _info.reset();
     }
 
     const std::shared_ptr<Info> &info() const noexcept
@@ -257,23 +259,9 @@ public:
         return _graphs[index];
     }
 
-    inline void *data() const noexcept
-    {
-        return _data;
-    }
-
-    inline size_t size() const noexcept
-    {
-        return _size;
-    }
-
 private:
     std::shared_ptr<Info> _info;
     std::vector<std::shared_ptr<Graph>> _graphs;
-
-    void *_data;
-    size_t _size;
-    const bool _internal_managed;
 };
 
 } // namespace core

@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <new>
 #include <string>
@@ -37,6 +38,8 @@ public:
     static inline constexpr const size_t default_fmt_buffer_size = 64;
     static inline constexpr const int default_floating_point_precision = 3;
 
+    static_assert(default_buffer_size < std::numeric_limits<int>::max(),
+        "Default buffer size must be less than INT_MAX");
     static_assert(default_buffer_size >= const_buffer_size_min,
         "Default buffer size must be at least const_buffer_size_min bytes");
     static_assert(const_fmt_buffer_size_min <= default_fmt_buffer_size && default_fmt_buffer_size < default_buffer_size,

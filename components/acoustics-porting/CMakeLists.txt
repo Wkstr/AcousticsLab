@@ -90,9 +90,19 @@ set(ACOUSTICS_PRIV_REQUIRES
     littlefs
 )
 
-if(DEFINED ACOUSTICS_PORTING_LIB_TFLM_ENABLE)
-    list(APPEND ACOUSTICS_REQUIRES esp-tflite-micro)
-    message(STATUS "Enabling TFLM support")
+if(NOT DEFINED ACOUSTICS_PORTING_LIB_TFLM_ENABLE)
+    set(PORTING_LIB_TFLM_ENABLE 0)
+    message(STATUS "TFLM support is disabled by default")
+else()
+    message(STATUS "TFLM support is set to: ${ACOUSTICS_PORTING_LIB_TFLM_ENABLE}")
+    if(ACOUSTICS_PORTING_LIB_TFLM_ENABLE STREQUAL "1" OR ACOUSTICS_PORTING_LIB_TFLM_ENABLE STREQUAL "ON")
+        set(PORTING_LIB_TFLM_ENABLE 1)
+        list(APPEND ACOUSTICS_REQUIRES esp-tflite-micro)
+        message(STATUS "TFLM support is enabled")
+    else()
+        set(PORTING_LIB_TFLM_ENABLE 0)
+        message(STATUS "TFLM support is disabled")
+    endif()
 endif()
 
 idf_component_register(
@@ -117,4 +127,5 @@ target_compile_definitions(${COMPONENT_LIB} PUBLIC
     CORE_VERSION_MAJOR=${ACOUSTICS_SDK_VERSION_MAJOR}
     CORE_VERSION_MINOR=${ACOUSTICS_SDK_VERSION_MINOR}
     CORE_VERSION_PATCH=${ACOUSTICS_SDK_VERSION_PATCH}
+    PORTING_LIB_TFLM_ENABLE=${PORTING_LIB_TFLM_ENABLE}
 )

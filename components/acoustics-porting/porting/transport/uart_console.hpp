@@ -27,15 +27,14 @@ namespace porting {
 class TransportUARTConsole final: public hal::Transport
 {
 public:
-    static core::ConfigObjectMap DEFAULT_CONFIGS()
+    static inline core::ConfigObjectMap DEFAULT_CONFIGS() noexcept
     {
-        core::ConfigObjectMap configs;
-        return configs;
+        return {};
     }
 
-    TransportUARTConsole() : Transport(Info(1, "UART Console", Type::UART, { DEFAULT_CONFIGS() })) { }
+    TransportUARTConsole() noexcept : Transport(Info(1, "UART Console", Type::UART, { DEFAULT_CONFIGS() })) { }
 
-    core::Status init() override
+    core::Status init() noexcept override
     {
         if (_info.status != Status::Uninitialized)
         {
@@ -70,7 +69,7 @@ public:
         return STATUS_OK();
     }
 
-    core::Status deinit() override
+    core::Status deinit() noexcept override
     {
         if (_info.status <= Status::Uninitialized)
         {
@@ -99,18 +98,14 @@ public:
         return STATUS_OK();
     }
 
-    core::Status updateConfig(const core::ConfigMap &configs) override
+    core::Status updateConfig(const core::ConfigMap &configs) noexcept override
     {
         return STATUS(ENOTSUP, "Update config is not supported for UART transport");
     }
 
-    inline int available() const override
+    inline size_t available() const noexcept override
     {
-        if (!_rx_buffer) [[unlikely]]
-        {
-            return -EFAULT;
-        }
-        if (!initialized()) [[unlikely]]
+        if (!initialized() || !_rx_buffer) [[unlikely]]
         {
             return 0;
         }
@@ -119,29 +114,28 @@ public:
         if (ret != 0) [[unlikely]]
         {
             LOG(ERROR, "Failed to sync read buffer: %s", std::strerror(ret));
-            return ret;
         }
         return _rx_buffer->size();
     }
 
-    inline int read(void *data, size_t size) override
+    inline size_t read(void *data, size_t size) noexcept override
     {
         if (!_rx_buffer) [[unlikely]]
         {
-            return -EFAULT;
+            return 0;
         }
 
         int ret = syncReadBuffer();
         if (ret != 0) [[unlikely]]
         {
             LOG(ERROR, "Failed to sync read buffer: %s", std::strerror(ret));
-            return ret;
+            return 0;
         }
 
         return _rx_buffer->read(reinterpret_cast<std::byte *>(data), size);
     }
 
-    inline int write(const void *data, size_t size) override
+    inline size_t write(const void *data, size_t size) noexcept override
     {
         if (!initialized()) [[unlikely]]
         {
@@ -169,7 +163,7 @@ public:
         return written;
     }
 
-    inline int flush() override
+    inline int flush() noexcept override
     {
         return fsync(fileno(stdout));
     }
@@ -177,23 +171,30 @@ public:
 protected:
     inline int syncReadBuffer() const noexcept override
     {
-        int r_len = 0;
         std::byte r_buf[32];
-        for (;;)
+        for (int r_len = 0;;)
         {
             r_len = usb_serial_jtag_read_bytes(r_buf, sizeof(r_buf), pdMS_TO_TICKS(10));
-            if (r_len < 0) [[unlikely]]
+            if (r_len > 0) [[likely]]
             {
-                return -EIO;
+                auto written = _rx_buffer->write(r_buf, r_len);
+                if (written < r_len) [[unlikely]]
+                {
+                    LOG(ERROR, "Failed to write all read bytes to RX buffer, written: %zu, expected: %d", written,
+                        r_len);
+                }
             }
             else if (r_len == 0)
             {
                 break;
             }
-            _rx_buffer->write(r_buf, r_len);
+            else
+            {
+                return -EIO;
+            }
         }
 
-        return r_len;
+        return 0;
     }
 
     inline core::RingBuffer<std::byte> &getReadBuffer() noexcept override

@@ -4,7 +4,6 @@
 
 #include "hal/device.hpp"
 #include "hal/engine.hpp"
-#include "hal/processor.hpp"
 #include "hal/sensor.hpp"
 #include "hal/transport.hpp"
 
@@ -72,7 +71,7 @@ protected:
     }
 
 private:
-    static core::Status init(int console, hal::Transport *&console_ptr)
+    static core::Status init(int console, hal::Transport *&console_ptr) noexcept
     {
         auto status = STATUS_OK();
 
@@ -92,6 +91,8 @@ private:
                 }
             }
         }
+
+        bridge::__REGISTER_ENGINES__();
 
         bridge::__REGISTER_SENSORS__();
 
