@@ -275,11 +275,12 @@ public:
                     return STATUS(EIO, "No data read from I2S channel");
                 }
                 batch_size = read / (_channels * sizeof(int16_t));
+                read = batch_size * (_channels * sizeof(int16_t));
             }
         }
 
         data_frame.data = core::Tensor::create(core::Tensor::Type::Int16,
-            core::Tensor::Shape(static_cast<int>(batch_size), 1), _data_buffer, read);
+            core::Tensor::Shape(static_cast<int>(batch_size), static_cast<int>(_channels)), _data_buffer, read);
         data_frame.index = _frame_index;
         _frame_index += batch_size;
 
