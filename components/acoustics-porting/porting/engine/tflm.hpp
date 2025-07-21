@@ -313,7 +313,7 @@ private:
 
             LOG(INFO, "Found TFLite model at offset %zu, address %p", i, data);
 
-            _model_infos.emplace_back(
+            _model_infos.emplace_front(
                 std::make_shared<core::Model::Info>(static_cast<int>(++id), std::string("Model_") + std::to_string(i),
                     core::Model::Type::TFLite, "TFL3", std::unordered_map<int, std::string> {}, data));
         }
@@ -369,7 +369,7 @@ private:
                 LOG(ERROR, "Input tensor %zu has no dimensions", i);
                 return STATUS(EFAULT, "Input tensor has no dimensions");
             }
-            std::vector<size_t> shape(dims->size);
+            std::vector<int> shape(dims->size);
             for (size_t j = 0; j < shape.size(); ++j)
             {
                 shape[j] = dims->data[j];
@@ -422,7 +422,7 @@ private:
                 LOG(ERROR, "Output tensor %zu has no dimensions", i);
                 return STATUS(EFAULT, "Output tensor has no dimensions");
             }
-            std::vector<size_t> shape(dims->size);
+            std::vector<int> shape(dims->size);
             for (size_t j = 0; j < shape.size(); ++j)
             {
                 shape[j] = dims->data[j];
