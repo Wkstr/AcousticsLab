@@ -117,7 +117,7 @@ public:
         return _model_infos;
     }
 
-    template<typename T, std::enable_if<std::is_invocable_r_v<bool, T, const core::Model::Info &>, bool> = true>
+    template<typename T, std::enable_if_t<std::is_invocable_r_v<bool, T, const core::Model::Info &>, bool> = true>
     std::shared_ptr<core::Model::Info> modelInfo(T &&pred) const noexcept
     {
         auto it = std::find_if(_model_infos.begin(), _model_infos.end(),

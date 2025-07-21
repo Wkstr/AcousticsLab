@@ -8,6 +8,6 @@ dependencies:
     version: ">=1.2.4"
     path: porting/driver/lis3dhtr
   littlefs:
-    version: ">=2.11.0"
+    version: ">=2.11.1"
     path: porting/driver/littlefs
   espressif/esp-tflite-micro: '*'
