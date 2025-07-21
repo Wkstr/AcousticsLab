@@ -145,32 +145,35 @@ public:
         _frame_index = 0;
         _data_bytes_available = 0;
 
-        if (_data_buffer)
+        if (_data_buffer) [[likely]]
         {
-            if (_data_buffer.use_count() > 1)
+            if (_data_buffer.use_count() > 1) [[unlikely]]
             {
                 LOG(ERROR, "Data buffer is already in use by another process");
                 return STATUS(EBUSY, "Data buffer is already in use");
             }
+
             _data_buffer.reset();
         }
 
-        if (_rx_chan)
+        if (_rx_chan) [[likely]]
         {
             auto ret = i2s_channel_disable(_rx_chan);
-            if (ret != ESP_OK)
+            if (ret != ESP_OK) [[unlikely]]
             {
                 LOG(ERROR, "Failed to disable I2S channel: %s", esp_err_to_name(ret));
                 return STATUS(EIO, "Failed to disable I2S channel");
             }
             ret = i2s_del_channel(_rx_chan);
-            if (ret != ESP_OK)
+            if (ret != ESP_OK) [[unlikely]]
             {
                 LOG(ERROR, "Failed to delete I2S channel: %s", esp_err_to_name(ret));
                 return STATUS(EIO, "Failed to delete I2S channel");
             }
             _rx_chan = nullptr;
         }
+
+        _info.status = Status::Uninitialized;
 
         return STATUS_OK();
     }
@@ -213,6 +216,12 @@ public:
     inline core::Status readDataFrame(core::DataFrame<std::unique_ptr<core::Tensor>> &data_frame,
         size_t batch_size) noexcept override
     {
+        if (batch_size == 0) [[unlikely]]
+        {
+            LOG(ERROR, "Batch size cannot be zero");
+            return STATUS(EINVAL, "Batch size cannot be zero");
+        }
+
         if (!initialized()) [[unlikely]]
         {
             LOG(ERROR, "Sensor is not initialized");
@@ -229,33 +238,28 @@ public:
             return STATUS(EBUSY, "Data buffer is already in use");
         }
 
-        if (batch_size == 0) [[unlikely]]
+        if (batch_size > _data_buffer_capacity_frames) [[unlikely]]
         {
-            LOG(ERROR, "Batch size cannot be zero");
-            return STATUS(EINVAL, "Batch size cannot be zero");
+            LOG(WARNING, "Batch size exceeds buffer capacity: %zu > %zu", batch_size, _data_buffer_capacity_frames);
+            batch_size = _data_buffer_capacity_frames;
         }
 
         const std::lock_guard<std::mutex> lock(_lock);
 
         _info.status = Status::Locked;
 
-        const size_t available = internalDataAvailable();
+        size_t available = internalDataAvailable();
         if (available > batch_size) [[unlikely]]
         {
             [[maybe_unused]] const auto discarded = internalDataDiscard(available - batch_size);
             LOG(DEBUG, "Discarded %zu staled frames from data buffer", discarded);
-        }
-        while (internalDataAvailable() < batch_size)
-        {
-            vTaskDelay(pdMS_TO_TICKS(5));
         }
 
         data_frame.timestamp = std::chrono::steady_clock::now();
 
         size_t read = 0;
         {
-            size_t size
-                = std::min(static_cast<size_t>(batch_size * _channels * sizeof(int16_t)), _data_buffer_capacity_bytes);
+            size_t size = batch_size * _channels * sizeof(int16_t);
             auto ret = i2s_channel_read(_rx_chan, _data_buffer.get(), size, &read,
                 pdMS_TO_TICKS((_buffered_duration + 1) * 1000));
             if (ret != ESP_OK) [[unlikely]]
@@ -264,12 +268,12 @@ public:
                 _info.status = Status::Idle;
                 return STATUS(EIO, "Failed to read data from I2S channel");
             }
-            internalConsumeData(size);
+            internalConsumeData(read);
 
             if (read != size) [[unlikely]]
             {
                 LOG(WARNING, "Read %zu bytes, expected %zu bytes", read, size);
-                if (read == 0)
+                if (!read) [[unlikely]]
                 {
                     _info.status = Status::Idle;
                     return STATUS(EIO, "No data read from I2S channel");
@@ -278,9 +282,9 @@ public:
                 read = batch_size * (_channels * sizeof(int16_t));
             }
         }
-
         data_frame.data = core::Tensor::create(core::Tensor::Type::Int16,
             core::Tensor::Shape(static_cast<int>(batch_size), static_cast<int>(_channels)), _data_buffer, read);
+
         data_frame.index = _frame_index;
         _frame_index += batch_size;
 
@@ -303,7 +307,7 @@ protected:
         {
             const size_t new_data_bytes_available = std::min(data_bytes_available + size, _data_buffer_capacity_bytes);
             if (_data_bytes_available.compare_exchange_strong(data_bytes_available, new_data_bytes_available,
-                    std::memory_order_release, std::memory_order_relaxed))
+                    std::memory_order_release, std::memory_order_relaxed)) [[likely]]
             {
                 return false;
             }
@@ -339,13 +343,17 @@ private:
 
     inline void internalConsumeData(size_t size) noexcept
     {
+        if (!size) [[unlikely]]
+        {
+            return;
+        }
         size_t data_bytes_available = _data_bytes_available.load(std::memory_order_acquire);
         while (1)
         {
             size = std::min(size, data_bytes_available);
             const size_t new_data_bytes_available = data_bytes_available - size;
             if (_data_bytes_available.compare_exchange_strong(data_bytes_available, new_data_bytes_available,
-                    std::memory_order_release, std::memory_order_relaxed))
+                    std::memory_order_release, std::memory_order_relaxed)) [[likely]]
             {
                 return;
             }
