@@ -223,6 +223,12 @@ public:
             LOG(ERROR, "Sensor is not in idle state");
             return STATUS(EINVAL, "Sensor is not in idle state");
         }
+        if (_data_buffer.use_count() > 1) [[unlikely]]
+        {
+            LOG(ERROR, "Data buffer is already in use by another process");
+            return STATUS(EBUSY, "Data buffer is already in use");
+        }
+
         if (batch_size == 0) [[unlikely]]
         {
             LOG(ERROR, "Batch size cannot be zero");
