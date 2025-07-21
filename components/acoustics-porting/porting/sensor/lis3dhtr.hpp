@@ -30,7 +30,7 @@ public:
             CONFIG_OBJECT_DECL_INTEGER("scl", "SCL pin number", 6, 1, 20),
             CONFIG_OBJECT_DECL_INTEGER("fsr", "Full scale range in G (2, 4, 8, 16)", 2, 2, 16),
             CONFIG_OBJECT_DECL_INTEGER("ord", "Output data rate in HZ (1, 10, 25, 50, 100, 200, 400)", 200, 1, 400),
-            CONFIG_OBJECT_DECL_INTEGER("sr", "Sample rate in Hz", 100, 1, 200) };
+            CONFIG_OBJECT_DECL_INTEGER("sr", "Sample rate in Hz", 100, 20, 200) };
     }
 
     SensorLIS3DHTR() noexcept
@@ -133,7 +133,7 @@ public:
                 LOG(DEBUG, "Allocated buffer of size: %zu bytes at %p", _buffer_capacity, _buffer.get());
             }
 
-            const TickType_t period = pdMS_TO_TICKS(1000 / sr);
+            _data_period = 1000 / sr;
             if (_timer)
             {
                 auto ret = xTimerDelete(_timer, portMAX_DELAY);
@@ -143,7 +143,7 @@ public:
                     return STATUS(EFAULT, "Failed to delete existing timer");
                 }
             }
-            _timer = xTimerCreate("lis3dhtr", period, pdTRUE, nullptr, timerCallback);
+            _timer = xTimerCreate("lis3dhtr", pdMS_TO_TICKS(_data_period), pdTRUE, nullptr, timerCallback);
             if (_timer == nullptr)
             {
                 LOG(ERROR, "Failed to create timer");
@@ -282,6 +282,12 @@ public:
     inline core::Status readDataFrame(core::DataFrame<std::unique_ptr<core::Tensor>> &data_frame,
         size_t batch_size) noexcept override
     {
+        if (batch_size == 0) [[unlikely]]
+        {
+            LOG(ERROR, "Batch size cannot be zero");
+            return STATUS(EINVAL, "Batch size cannot be zero");
+        }
+
         if (!initialized()) [[unlikely]]
         {
             LOG(ERROR, "Sensor is not initialized");
@@ -298,11 +304,6 @@ public:
             return STATUS(EBUSY, "Data buffer is already in use");
         }
 
-        if (batch_size == 0) [[unlikely]]
-        {
-            LOG(ERROR, "Batch size cannot be zero");
-            return STATUS(EINVAL, "Batch size cannot be zero");
-        }
         if (batch_size > _buffer_capacity) [[unlikely]]
         {
             LOG(WARNING, "Batch size exceeds buffer capacity: %zu > %zu", batch_size, _buffer_capacity);
@@ -318,18 +319,22 @@ public:
 
         _info.status = Status::Locked;
 
-        const size_t available = _buffer->size();
-        if (available > batch_size)
-        {
-            [[maybe_unused]] const auto discarded = _buffer->read(nullptr, available - batch_size);
-            LOG(DEBUG, "Discarded %zu staled elements from buffer", discarded);
-        }
-        while (_buffer->size() < batch_size)
+        size_t available = _buffer->size();
+        auto ts = std::chrono::steady_clock::now();
+        while (available < batch_size)
         {
             vTaskDelay(pdMS_TO_TICKS(5));
-        }
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - ts)
+                > std::chrono::milliseconds(50 * _data_buffer_capacity)) [[unlikely]]
+            {
+                LOG(ERROR, "Timeout while waiting for data, available: %zu, requested: %zu", available, batch_size);
+                _info.status = Status::Idle;
+                return STATUS(ETIMEDOUT, "Timeout while waiting for data");
+            }
 
-        data_frame.timestamp = std::chrono::steady_clock::now();
+            available = _buffer->size();
+        }
+        data_frame.timestamp = ts;
 
         batch_size = _buffer->read(reinterpret_cast<Data *>(_data_buffer.get()), batch_size);
         data_frame.data = core::Tensor::create(core::Tensor::Type::Float32,
@@ -379,15 +384,16 @@ protected:
 private:
     mutable std::mutex _lock;
     driver::LIS3DHTR *_lis3dhtr = nullptr;
-    static constexpr size_t _buffer_capacity = 2048;
+    static inline constexpr const size_t _buffer_capacity = 2048;
     std::unique_ptr<core::RingBuffer<Data>> _buffer = nullptr;
+    size_t _data_period = 0;
     volatile int _sensor_status = 0;
     TimerHandle_t _timer = nullptr;
     static SensorLIS3DHTR *_this;
 
     size_t _frame_index = 0;
     std::shared_ptr<std::byte[]> _data_buffer = nullptr;
-    static constexpr size_t _data_buffer_capacity = _buffer_capacity / 2;
+    static inline constexpr const size_t _data_buffer_capacity = _buffer_capacity / 2;
 };
 
 SensorLIS3DHTR *SensorLIS3DHTR::_this = nullptr;
