@@ -320,11 +320,6 @@ public:
         _info.status = Status::Locked;
 
         size_t available = _buffer->size();
-        if (available > batch_size)
-        {
-            [[maybe_unused]] const auto discarded = _buffer->read(nullptr, available - batch_size);
-            LOG(DEBUG, "Discarded %zu staled elements from buffer", discarded);
-        }
         auto ts = std::chrono::steady_clock::now();
         while (available < batch_size)
         {

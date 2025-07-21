@@ -248,13 +248,6 @@ public:
 
         _info.status = Status::Locked;
 
-        size_t available = internalDataAvailable();
-        if (available > batch_size) [[unlikely]]
-        {
-            [[maybe_unused]] const auto discarded = internalDataDiscard(available - batch_size);
-            LOG(DEBUG, "Discarded %zu staled frames from data buffer", discarded);
-        }
-
         data_frame.timestamp = std::chrono::steady_clock::now();
 
         size_t read = 0;
