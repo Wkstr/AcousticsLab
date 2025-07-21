@@ -11,6 +11,7 @@
 #include <lis3dhtr.h>
 
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -190,7 +191,6 @@ public:
         {
             return STATUS_OK();
         }
-
         if (_info.status == Status::Locked)
         {
             return STATUS(EBUSY, "Sensor is locked");
@@ -199,6 +199,11 @@ public:
         _frame_index = 0;
         if (_data_buffer)
         {
+            if (_data_buffer.use_count() > 1)
+            {
+                LOG(ERROR, "Data buffer is already in use by another process");
+                return STATUS(EBUSY, "Data buffer is already in use");
+            }
             _data_buffer.reset();
         }
 
@@ -248,25 +253,27 @@ public:
 
     inline size_t dataAvailable() const noexcept override
     {
-        const std::lock_guard<std::mutex> lock(_lock);
-
         if (!_buffer) [[unlikely]]
         {
             LOG(ERROR, "Buffer is not initialized");
             return 0;
         }
+
+        const std::lock_guard<std::mutex> lock(_lock);
+
         return _buffer->size() > _data_buffer_capacity ? _data_buffer_capacity : _buffer->size();
     }
 
     inline size_t dataClear() noexcept override
     {
-        const std::lock_guard<std::mutex> lock(_lock);
-
         if (!_buffer) [[unlikely]]
         {
             LOG(ERROR, "Buffer is not initialized");
             return 0;
         }
+
+        const std::lock_guard<std::mutex> lock(_lock);
+
         const auto available = _buffer->size();
         _buffer->clear();
         return available;
@@ -275,8 +282,6 @@ public:
     inline core::Status readDataFrame(core::DataFrame<std::unique_ptr<core::Tensor>> &data_frame,
         size_t batch_size) noexcept override
     {
-        const std::lock_guard<std::mutex> lock(_lock);
-
         if (!initialized()) [[unlikely]]
         {
             LOG(ERROR, "Sensor is not initialized");
@@ -293,6 +298,11 @@ public:
             return STATUS(EBUSY, "Data buffer is already in use");
         }
 
+        if (batch_size == 0) [[unlikely]]
+        {
+            LOG(ERROR, "Batch size cannot be zero");
+            return STATUS(EINVAL, "Batch size cannot be zero");
+        }
         if (batch_size > _buffer_capacity) [[unlikely]]
         {
             LOG(WARNING, "Batch size exceeds buffer capacity: %zu > %zu", batch_size, _buffer_capacity);
@@ -304,6 +314,8 @@ public:
             batch_size = _data_buffer_capacity;
         }
 
+        const std::lock_guard<std::mutex> lock(_lock);
+
         _info.status = Status::Locked;
 
         const size_t available = _buffer->size();
@@ -312,10 +324,9 @@ public:
             [[maybe_unused]] const auto discarded = _buffer->read(nullptr, available - batch_size);
             LOG(DEBUG, "Discarded %zu staled elements from buffer", discarded);
         }
-        else if (available < batch_size)
+        while (_buffer->size() < batch_size)
         {
-            LOG(WARNING, "Not enough data in buffer: %zu available, requested %zu", available, batch_size);
-            batch_size = available;
+            vTaskDelay(pdMS_TO_TICKS(5));
         }
 
         data_frame.timestamp = std::chrono::steady_clock::now();
@@ -369,7 +380,7 @@ private:
     mutable std::mutex _lock;
     driver::LIS3DHTR *_lis3dhtr = nullptr;
     static constexpr size_t _buffer_capacity = 2048;
-    std::unique_ptr<core::RingBuffer<Data>> _buffer;
+    std::unique_ptr<core::RingBuffer<Data>> _buffer = nullptr;
     volatile int _sensor_status = 0;
     TimerHandle_t _timer = nullptr;
     static SensorLIS3DHTR *_this;
