@@ -323,9 +323,9 @@ public:
         auto ts = std::chrono::steady_clock::now();
         while (available < batch_size)
         {
-            vTaskDelay(pdMS_TO_TICKS(5));
+            vTaskDelay(pdMS_TO_TICKS(_data_period));
             if (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - ts)
-                > std::chrono::milliseconds(50 * _data_buffer_capacity)) [[unlikely]]
+                > std::chrono::milliseconds(_data_period * (batch_size + 1))) [[unlikely]]
             {
                 LOG(ERROR, "Timeout while waiting for data, available: %zu, requested: %zu", available, batch_size);
                 _info.status = Status::Idle;
