@@ -11,6 +11,7 @@
 #include <lis3dhtr.h>
 
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -29,7 +30,7 @@ public:
             CONFIG_OBJECT_DECL_INTEGER("scl", "SCL pin number", 6, 1, 20),
             CONFIG_OBJECT_DECL_INTEGER("fsr", "Full scale range in G (2, 4, 8, 16)", 2, 2, 16),
             CONFIG_OBJECT_DECL_INTEGER("ord", "Output data rate in HZ (1, 10, 25, 50, 100, 200, 400)", 200, 1, 400),
-            CONFIG_OBJECT_DECL_INTEGER("sr", "Sample rate in Hz", 100, 1, 200) };
+            CONFIG_OBJECT_DECL_INTEGER("sr", "Sample rate in Hz", 100, 20, 200) };
     }
 
     SensorLIS3DHTR() noexcept
@@ -132,7 +133,7 @@ public:
                 LOG(DEBUG, "Allocated buffer of size: %zu bytes at %p", _buffer_capacity, _buffer.get());
             }
 
-            const TickType_t period = pdMS_TO_TICKS(1000 / sr);
+            _data_period = 1000 / sr;
             if (_timer)
             {
                 auto ret = xTimerDelete(_timer, portMAX_DELAY);
@@ -142,7 +143,7 @@ public:
                     return STATUS(EFAULT, "Failed to delete existing timer");
                 }
             }
-            _timer = xTimerCreate("lis3dhtr", period, pdTRUE, nullptr, timerCallback);
+            _timer = xTimerCreate("lis3dhtr", pdMS_TO_TICKS(_data_period), pdTRUE, nullptr, timerCallback);
             if (_timer == nullptr)
             {
                 LOG(ERROR, "Failed to create timer");
@@ -190,7 +191,6 @@ public:
         {
             return STATUS_OK();
         }
-
         if (_info.status == Status::Locked)
         {
             return STATUS(EBUSY, "Sensor is locked");
@@ -199,6 +199,11 @@ public:
         _frame_index = 0;
         if (_data_buffer)
         {
+            if (_data_buffer.use_count() > 1)
+            {
+                LOG(ERROR, "Data buffer is already in use by another process");
+                return STATUS(EBUSY, "Data buffer is already in use");
+            }
             _data_buffer.reset();
         }
 
@@ -248,25 +253,27 @@ public:
 
     inline size_t dataAvailable() const noexcept override
     {
-        const std::lock_guard<std::mutex> lock(_lock);
-
         if (!_buffer) [[unlikely]]
         {
             LOG(ERROR, "Buffer is not initialized");
             return 0;
         }
+
+        const std::lock_guard<std::mutex> lock(_lock);
+
         return _buffer->size() > _data_buffer_capacity ? _data_buffer_capacity : _buffer->size();
     }
 
     inline size_t dataClear() noexcept override
     {
-        const std::lock_guard<std::mutex> lock(_lock);
-
         if (!_buffer) [[unlikely]]
         {
             LOG(ERROR, "Buffer is not initialized");
             return 0;
         }
+
+        const std::lock_guard<std::mutex> lock(_lock);
+
         const auto available = _buffer->size();
         _buffer->clear();
         return available;
@@ -275,7 +282,11 @@ public:
     inline core::Status readDataFrame(core::DataFrame<std::unique_ptr<core::Tensor>> &data_frame,
         size_t batch_size) noexcept override
     {
-        const std::lock_guard<std::mutex> lock(_lock);
+        if (batch_size == 0) [[unlikely]]
+        {
+            LOG(ERROR, "Batch size cannot be zero");
+            return STATUS(EINVAL, "Batch size cannot be zero");
+        }
 
         if (!initialized()) [[unlikely]]
         {
@@ -304,21 +315,26 @@ public:
             batch_size = _data_buffer_capacity;
         }
 
+        const std::lock_guard<std::mutex> lock(_lock);
+
         _info.status = Status::Locked;
 
-        const size_t available = _buffer->size();
-        if (available > batch_size)
+        size_t available = _buffer->size();
+        auto ts = std::chrono::steady_clock::now();
+        while (available < batch_size)
         {
-            [[maybe_unused]] const auto discarded = _buffer->read(nullptr, available - batch_size);
-            LOG(DEBUG, "Discarded %zu staled elements from buffer", discarded);
-        }
-        else if (available < batch_size)
-        {
-            LOG(WARNING, "Not enough data in buffer: %zu available, requested %zu", available, batch_size);
-            batch_size = available;
-        }
+            vTaskDelay(pdMS_TO_TICKS(_data_period));
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - ts)
+                > std::chrono::milliseconds(_data_period * (batch_size + 1))) [[unlikely]]
+            {
+                LOG(ERROR, "Timeout while waiting for data, available: %zu, requested: %zu", available, batch_size);
+                _info.status = Status::Idle;
+                return STATUS(ETIMEDOUT, "Timeout while waiting for data");
+            }
 
-        data_frame.timestamp = std::chrono::steady_clock::now();
+            available = _buffer->size();
+        }
+        data_frame.timestamp = ts;
 
         batch_size = _buffer->read(reinterpret_cast<Data *>(_data_buffer.get()), batch_size);
         data_frame.data = core::Tensor::create(core::Tensor::Type::Float32,
@@ -368,15 +384,16 @@ protected:
 private:
     mutable std::mutex _lock;
     driver::LIS3DHTR *_lis3dhtr = nullptr;
-    static constexpr size_t _buffer_capacity = 2048;
-    std::unique_ptr<core::RingBuffer<Data>> _buffer;
+    static inline constexpr const size_t _buffer_capacity = 2048;
+    std::unique_ptr<core::RingBuffer<Data>> _buffer = nullptr;
+    size_t _data_period = 0;
     volatile int _sensor_status = 0;
     TimerHandle_t _timer = nullptr;
     static SensorLIS3DHTR *_this;
 
     size_t _frame_index = 0;
     std::shared_ptr<std::byte[]> _data_buffer = nullptr;
-    static constexpr size_t _data_buffer_capacity = _buffer_capacity / 2;
+    static inline constexpr const size_t _data_buffer_capacity = _buffer_capacity / 2;
 };
 
 SensorLIS3DHTR *SensorLIS3DHTR::_this = nullptr;
