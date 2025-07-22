@@ -132,6 +132,7 @@ public:
                 }
                 LOG(DEBUG, "Allocated buffer of size: %zu bytes at %p", _buffer_capacity, _buffer.get());
             }
+            _buffer->clear();
 
             _data_period = 1000 / sr;
             if (_timer)
