@@ -78,11 +78,10 @@ if(${ACOUSTICS_SDK_TARGET} STREQUAL "POSIX")
         ACOUSTICS_API_VERSION=${ACOUSTICS_API_VERSION}
     )
 
-        set_target_properties(acoustics PROPERTIES
-            CXX_STANDARD 20
-            CXX_STANDARD_REQUIRED ON
-        )
-    endif()
+    set_target_properties(acoustics PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+    )
 endif()
 
 add_compile_options(-fdiagnostics-color=always -ffast-math -O2)

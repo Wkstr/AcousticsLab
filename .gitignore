@@ -38,9 +38,5 @@ __pycache__
 *.pyc
 .venv
 
-# Custom
-.log
-.issues
-
-# Model
-models
+# Logs
+*.log

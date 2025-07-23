@@ -1,4 +1,0 @@
-## IDF Component Manager Manifest File
-dependencies:
-  esp-tflite-micro: "^1.0.0"
-  esp-nn: "^1.0.0"

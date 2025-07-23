@@ -96,10 +96,6 @@ private:
 
         bridge::__REGISTER_SENSORS__();
 
-        bridge::__REGISTER_PROCESSORS__();
-
-        bridge::__REGISTER_ENGINES__();
-
         bridge::__REGISTER_TRANSPORTS__();
         {
             auto transport = hal::TransportRegistry::getTransport(console);

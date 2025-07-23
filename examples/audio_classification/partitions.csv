@@ -1,5 +1,0 @@
-
-factory,    app,   factory, 0x010000,   3840K
-nvs,        data,  nvs,     0x3D0000,   16K
-fr,         data,  ,        0x3E0000,   128K
-littlefs,   data,  ,        0x400000,   1024K

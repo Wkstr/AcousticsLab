@@ -21,23 +21,6 @@ file(GLOB_RECURSE ACOUSTICS_PORTING_SRCS
     ${CMAKE_CURRENT_LIST_DIR}/porting/*.hpp
     ${CMAKE_CURRENT_LIST_DIR}/porting/*.cpp
 )
-
-# Add KissFFT sources from acoustics component
-set(KISSFFT_DIR "${CMAKE_CURRENT_LIST_DIR}/../acoustics/third_party/kissfft")
-if(EXISTS "${KISSFFT_DIR}")
-    # Add KissFFT C sources
-    set(KISSFFT_SRCS
-        "${KISSFFT_DIR}/kiss_fft.c"
-        "${KISSFFT_DIR}/kiss_fftr.c"
-    )
-    list(APPEND ACOUSTICS_PORTING_SRCS ${KISSFFT_SRCS})
-
-    # Note: set_source_files_properties needs to be called after idf_component_register
-
-    message(STATUS "Added KissFFT sources from: ${KISSFFT_DIR}")
-else()
-    message(WARNING "KissFFT directory not found: ${KISSFFT_DIR}")
-endif()
 message(STATUS "ACOUSTICS_PORTING_SRCS: ${ACOUSTICS_PORTING_SRCS}")
 
 set_property(GLOBAL PROPERTY ACOUSTICS_SDK_TARGET "POSIX")
@@ -111,15 +94,6 @@ idf_component_register(
     REQUIRES freertos ${ACOUSTICS_REQUIRES}
     PRIV_REQUIRES ${ACOUSTICS_PRIV_REQUIRES}
 )
-
-# Set KissFFT sources to be compiled as C (after component registration)
-if(EXISTS "${KISSFFT_DIR}")
-    set_source_files_properties(
-        "${KISSFFT_DIR}/kiss_fft.c"
-        "${KISSFFT_DIR}/kiss_fftr.c"
-        PROPERTIES LANGUAGE C
-    )
-endif()
 
 add_compile_options(-fdiagnostics-color=always -ffast-math -O2)
 

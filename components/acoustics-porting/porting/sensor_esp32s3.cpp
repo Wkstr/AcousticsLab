@@ -2,7 +2,6 @@
 
 #include "sensor/i2smic.hpp"
 #include "sensor/lis3dhtr.hpp"
-#include "sensor/microphone.hpp"
 
 namespace bridge {
 
