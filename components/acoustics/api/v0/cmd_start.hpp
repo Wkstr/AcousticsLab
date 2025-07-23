@@ -239,11 +239,6 @@ public:
             status = STATUS(ENODEV, "Device is not registered or initialized");
             goto Reply;
         }
-        status = makeSensorReady();
-        if (!status) [[unlikely]]
-        {
-            goto Reply;
-        }
 
         if (auto it = args.find("@0"); it != args.end())
         {
@@ -252,6 +247,11 @@ public:
                 if (*action == "sample")
                 {
                     sample_enabled = true;
+                    status = makeSensorReady();
+                    if (!status) [[unlikely]]
+                    {
+                        goto Reply;
+                    }
                 }
                 else if (*action == "invoke")
                 {
@@ -372,6 +372,7 @@ public:
         }
         else if (!sensor->initialized()) [[unlikely]]
         {
+            sensor->deinit();
             status = sensor->init();
         }
         if (_sensor != sensor) [[unlikely]]

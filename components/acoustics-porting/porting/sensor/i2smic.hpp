@@ -130,10 +130,6 @@ public:
     {
         const std::lock_guard<std::mutex> lock(_lock);
 
-        if (_info.status <= Status::Uninitialized)
-        {
-            return STATUS_OK();
-        }
         if (_info.status == Status::Locked)
         {
             return STATUS(EBUSY, "Sensor is locked");
