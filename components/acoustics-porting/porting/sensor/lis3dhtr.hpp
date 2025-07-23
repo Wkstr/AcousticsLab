@@ -132,6 +132,7 @@ public:
                 }
                 LOG(DEBUG, "Allocated buffer of size: %zu bytes at %p", _buffer_capacity, _buffer.get());
             }
+            _buffer->clear();
 
             _data_period = 1000 / sr;
             if (_timer)
@@ -187,19 +188,15 @@ public:
     {
         const std::lock_guard<std::mutex> lock(_lock);
 
-        if (_info.status <= Status::Uninitialized)
-        {
-            return STATUS_OK();
-        }
         if (_info.status == Status::Locked)
         {
             return STATUS(EBUSY, "Sensor is locked");
         }
 
         _frame_index = 0;
-        if (_data_buffer)
+        if (_data_buffer) [[likely]]
         {
-            if (_data_buffer.use_count() > 1)
+            if (_data_buffer.use_count() > 1) [[unlikely]]
             {
                 LOG(ERROR, "Data buffer is already in use by another process");
                 return STATUS(EBUSY, "Data buffer is already in use");
@@ -207,16 +204,16 @@ public:
             _data_buffer.reset();
         }
 
-        if (_timer)
+        if (_timer) [[likely]]
         {
             auto ret = xTimerStop(_timer, portMAX_DELAY);
-            if (ret != pdPASS)
+            if (ret != pdPASS) [[unlikely]]
             {
                 LOG(ERROR, "Failed to stop timer: %d", ret);
                 return STATUS(EFAULT, "Failed to stop timer");
             }
             ret = xTimerDelete(_timer, portMAX_DELAY);
-            if (ret != pdPASS)
+            if (ret != pdPASS) [[unlikely]]
             {
                 LOG(ERROR, "Failed to delete timer at: %p", _timer);
                 return STATUS(EFAULT, "Failed to delete timer");
@@ -224,17 +221,17 @@ public:
             _timer = nullptr;
         }
 
-        if (_this == this)
+        if (_this == this) [[likely]]
         {
             _this = nullptr;
         }
 
-        if (_buffer)
+        if (_buffer) [[likely]]
         {
             _buffer.reset();
         }
 
-        if (_lis3dhtr)
+        if (_lis3dhtr) [[likely]]
         {
             _lis3dhtr->deinit();
             delete _lis3dhtr;
@@ -261,7 +258,7 @@ public:
 
         const std::lock_guard<std::mutex> lock(_lock);
 
-        return _buffer->size() > _data_buffer_capacity ? _data_buffer_capacity : _buffer->size();
+        return _buffer->size();
     }
 
     inline size_t dataClear() noexcept override
@@ -332,6 +329,8 @@ public:
                 return STATUS(ETIMEDOUT, "Timeout while waiting for data");
             }
 
+            LOG(WARNING, "Waiting for data, available: %zu, requested: %zu", available, batch_size);
+
             available = _buffer->size();
         }
         data_frame.timestamp = ts;
@@ -359,9 +358,8 @@ public:
 protected:
     static void timerCallback(TimerHandle_t xTimer) noexcept
     {
-        if (!_this || !_this->_lis3dhtr || !_this->_buffer) [[unlikely]]
+        if (!_this || !_this->_lis3dhtr || !_this->_buffer || _this->_sensor_status != 0) [[unlikely]]
         {
-            LOG(ERROR, "Timer callback called with invalid state");
             return;
         }
 
@@ -371,6 +369,7 @@ protected:
         {
             LOG(ERROR, "Failed to read acceleration data: %d", ret);
             _this->_sensor_status = ret;
+            _this->_info.status = Status::Unknown;
             return;
         }
 
