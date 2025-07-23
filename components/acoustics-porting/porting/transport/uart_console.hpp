@@ -71,11 +71,6 @@ public:
 
     core::Status deinit() noexcept override
     {
-        if (_info.status <= Status::Uninitialized)
-        {
-            return STATUS_OK();
-        }
-
         if (_info.status == Status::Locked)
         {
             return STATUS(EBUSY, "Transport is currently locked");
