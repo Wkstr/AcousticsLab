@@ -14,7 +14,7 @@ The objective of the learning phase is to establish a **baseline template of nor
 
 ![Learning Process Example](learning_example.png)
 
-1.  **Template Generation**: First, a `sliding window` of 3-axis acceleration data, sized to cover a complete normal operational cycle, is collected to serve as the **template data**.
+1.  **Template Generation**: First, a `sample window` of 3-axis acceleration data, sized to cover a complete normal operational cycle, is collected to serve as the **template data**.
 2.  **Distance Calculation**: The algorithm then randomly samples `N` short data segments or named `chunks` from identical positions within each channel of the template. Each chunk is then slid across the entire template of its corresponding channel with a defined `sliding step`, calculating the Euclidean (L2) distance at each position.
 3.  **Threshold Calculation**: Next, outliers are filtered from these distances (e.g., using the 3σ rule; specifically, values less than a given EPS). For each channel, the remaining distances are sorted to identify the `M` smallest values. An average **threshold** is then computed for each channel from these `M` distances, defining the boundary between normal and abnormal states.
 4.  **Parameter Calibration**: Finally, an additional parameter, `C`, is determined by finding the median counts of consecutive instances where the Euclidean distance is below the threshold during a subsequent comparison. This parameter is stored to enhance detection accuracy in the next phase.
