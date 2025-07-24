@@ -44,6 +44,12 @@ AcousticsLab implements a user-friendly web interface to visualize audio/vibrati
 
 3. Open the console in your web browser at `http://localhost:7860`.
 
+## Algorithms
+
+AcousticsLab aims to provide a comprehensive set of SOTA algorithms for sound and vibration analysis. The current implementation includes:
+
+- [Gyroscope Euclidean Distance Anomaly Detection (GEDAD)](docs/algorithms/gedad/how-it-works.md): A lightweight algorithm for detecting anomalies in gyroscope and 3-axis accelerometer data.
+
 ## Architecture Overview
 
 This diagram shows a modular embedded AI architecture. It features a layered design with a Hardware Abstraction Layer (HAL), a Core Library (with DSP/ML), an API, and an Application layer. The architecture is designed to simplify development and integrate easily with platforms like Arduino and MicroPython.
