@@ -36,7 +36,7 @@ The actual computation is more complex, involving the fusion of anomaly scores a
 
 In summary, the algorithm's advantages include:
 
-  * Fast training speed
+  * Fast *training* speed
   * Low computational overhead
   * Suitability for low-power embedded devices
   * Requires only a small amount of normal data for training
