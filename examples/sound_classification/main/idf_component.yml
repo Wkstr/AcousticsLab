@@ -4,3 +4,6 @@ dependencies:
   acoustics-porting:
     version: '>=1.0.0'
     path: ../../../components/acoustics-porting
+  espressif/esp-nn: '*'
+  espressif/esp-dsp: '*'
+  espressif/dl_fft: '*'

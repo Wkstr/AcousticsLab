@@ -15,7 +15,7 @@ set(ACOUSTICS_PORTING_LIB_TFLM_ENABLE ON CACHE BOOL "Enable TFLM support in acou
 idf_component_register(
     SRCS ${PROJ_SRCS}
     INCLUDE_DIRS ${PROJ_INCLUDE_DIRS}
-    REQUIRES freertos esp_psram esp_system acoustics-porting
+    REQUIRES freertos esp_psram esp_system acoustics-porting espressif__dl_fft
 )
 
 add_compile_options(-fdiagnostics-color=always -ffast-math -O2)
