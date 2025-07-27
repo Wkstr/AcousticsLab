@@ -28,8 +28,10 @@ private:
     float *fft_input_buffer;
     float *log_features_buffer;
     float *audio_float_buffer;
+    float *blackman_window;
 
     void convert_int16_to_float(const int16_t *input, float *output);
     void prepare_frame(const float *audio_data, size_t frame_idx);
     void normalize_globally(float *features, size_t total_features);
+    void init_blackman_window();
 };
