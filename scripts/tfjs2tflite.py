@@ -17,6 +17,9 @@ from typing import Optional, List, Dict, Any, Iterator
 from scipy.io import wavfile
 from scipy.signal import resample
 from tensorflow.lite.python.interpreter import Interpreter
+from tensorflowjs.converters.converter import (
+    dispatch_tensorflowjs_to_keras_h5_conversion,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -231,19 +234,13 @@ class ModelConverter:
 
         try:
             logging.info("🔄 Converting TF.js model using tensorflowjs converter...")
-            command = [
-                "tensorflowjs_converter",
-                "--input_format=tfjs_layers_model",
-                "--output_format=keras",
+
+            dispatch_tensorflowjs_to_keras_h5_conversion(
                 self.tfjs_model_path,
                 self.keras_output_path,
-            ]
+            )
 
-            logging.info(f"🔄 Executing command: {' '.join(command)}")
-
-            result = subprocess.run(command, capture_output=True, text=True, check=True)
-
-            logging.info(f"tensorflowjs_converter stdout:\n{result.stdout}")
+            logging.info("TensorFlow.js to Keras conversion completed successfully")
 
             # Verify the output file was created successfully
             if not os.path.exists(self.keras_output_path):
