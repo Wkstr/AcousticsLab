@@ -8,23 +8,25 @@
 #include <algorithm>
 #include <memory>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace module {
 
-struct MIO final
+class MIO final
 {
+public:
     template<typename T,
         std::enable_if_t<std::is_same_v<std::remove_cvref_t<T>, std::shared_ptr<core::Tensor>>, bool> = true>
-    explicit MIO(T &&tensor, std::string_view attribute = "") noexcept
+    constexpr explicit MIO(T &&tensor, std::string_view attribute = "") noexcept
         : tensor(std::forward<T>(tensor)), attribute(attribute)
     {
     }
 
     ~MIO() = default;
 
-    inline core::Tensor *operator()() const noexcept
+    constexpr inline core::Tensor *operator()() const noexcept
     {
         return tensor.get();
     }
@@ -35,7 +37,7 @@ struct MIO final
 
 using MIOS = std::vector<std::shared_ptr<MIO>>;
 
-bool operator==(const MIOS &lhs, const MIOS &rhs) noexcept
+inline bool operator==(const MIOS &lhs, const MIOS &rhs) noexcept
 {
     if (lhs.size() != rhs.size()) [[unlikely]]
     {
