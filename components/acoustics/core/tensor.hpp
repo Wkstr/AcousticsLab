@@ -5,6 +5,7 @@
 #include "logger.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -71,6 +72,11 @@ public:
                 return 0;
             }
             return _dims[index];
+        }
+
+        inline bool operator==(const Shape &other) const noexcept
+        {
+            return _dot == other._dot && std::equal(_dims.cbegin(), _dims.cend(), other._dims.cbegin());
         }
 
         inline int dot() const noexcept
