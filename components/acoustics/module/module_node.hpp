@@ -10,6 +10,7 @@
 #include "core/tensor.hpp"
 
 #include <memory>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -21,19 +22,19 @@ class MNode;
 class MNodeBuilderRegistry final
 {
 public:
-    using NodeBuilder = std::shared_ptr<MNode> (*)(int, MIOS &, MIOS &, const core::ConfigMap &);
+    using NodeBuilder = std::shared_ptr<MNode> (*)(const core::ConfigMap *, MIOS *, MIOS *, int);
     using NodeBuilderMap = std::unordered_map<std::string_view, NodeBuilder>;
 
     MNodeBuilderRegistry() = default;
     ~MNodeBuilderRegistry() = default;
 
-    inline static std::shared_ptr<MNode> getNode(std::string_view name, int priority, MIOS &inputs, MIOS &outputs,
-        const core::ConfigMap &configs) noexcept
+    inline static std::shared_ptr<MNode> getNode(std::string_view name, const core::ConfigMap *configs = nullptr,
+        MIOS *inputs = nullptr, MIOS *outputs = nullptr, int priority = 0) noexcept
     {
         auto it = _nodes.find(name);
         if (it != _nodes.end()) [[likely]]
         {
-            return it->second(priority, inputs, outputs, configs);
+            return it->second(configs, inputs, outputs, priority);
         }
         return {};
     }
@@ -43,7 +44,8 @@ public:
         return _nodes;
     }
 
-    static core::Status registerNodeBuilder(std::string_view name, NodeBuilder builder, bool replace = false) noexcept;
+    static constexpr core::Status registerNodeBuilder(std::string_view name, NodeBuilder builder,
+        bool replace = false) noexcept;
 
 private:
     static NodeBuilderMap _nodes;
@@ -126,7 +128,10 @@ public:
         return {};
     }
 
-    virtual core::Status config(const core::ConfigMap &configs) noexcept = 0;
+    virtual core::Status config(const core::ConfigMap &configs) noexcept
+    {
+        return STATUS(ENOTSUP, "Configuration not supported for this node");
+    }
 
     inline core::Status operator()() noexcept
     {
@@ -135,18 +140,20 @@ public:
 
 protected:
     template<typename IS, typename OS>
-    explicit MNode(std::string_view name, int priority, IS &&inputs, OS &&outputs) noexcept
-        : _name(name), _priority(priority), _inputs(std::forward<IS>(inputs)), _outputs(std::forward<OS>(outputs))
+    constexpr explicit MNode(std::string name, IS &&inputs, OS &&outputs, int priority) noexcept
+        : _name(std::move(name)), _inputs(std::forward<IS>(inputs)), _outputs(std::forward<OS>(outputs)),
+          _priority(priority)
     {
+        LOG(DEBUG, "Module node '%s' created with priority %d", _name.c_str(), _priority);
     }
 
     virtual inline core::Status forward(const MIOS &inputs, MIOS &outputs) noexcept = 0;
 
 private:
-    std::string_view _name;
-    int _priority;
+    const std::string _name;
     MIOS _inputs;
     MIOS _outputs;
+    const int _priority;
 };
 
 } // namespace module
