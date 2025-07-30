@@ -5,6 +5,7 @@
 #include "core/logger.hpp"
 #include "core/tensor.hpp"
 
+#include <algorithm>
 #include <memory>
 #include <string_view>
 #include <utility>
@@ -12,54 +13,39 @@
 
 namespace module {
 
-class MIO final
+struct MIO final
 {
-public:
-    struct IO final
+    template<typename T,
+        std::enable_if_t<std::is_same_v<std::remove_cvref_t<T>, std::shared_ptr<core::Tensor>>, bool> = true>
+    explicit MIO(T &&tensor, std::string_view attribute = "") noexcept
+        : tensor(std::forward<T>(tensor)), attribute(attribute)
     {
-        template<typename T,
-            std::enable_if_t<std::is_same_v<std::remove_cvref_t<T>, std::shared_ptr<core::Tensor>>, bool> = true>
-        explicit IO(T &&tensor, std::string_view attribute = "") noexcept
-            : tensor(std::forward<T>(tensor)), attribute(attribute)
-        {
-        }
-
-        ~IO() = default;
-
-        std::shared_ptr<core::Tensor> tensor;
-        const std::string_view attribute;
-    };
-
-    using IOS = std::vector<std::unique_ptr<IO>>;
-
-    template<typename T = std::shared_ptr<MIO>, typename... Args>
-    [[nodiscard]] static T create(Args &&...args) noexcept
-    {
-        return T { new MIO(IOS { std::make_unique<IO>(std::forward<Args>(args)...)... }) };
     }
 
     ~MIO() = default;
 
-    const IOS &operator()() const noexcept
+    inline core::Tensor *operator()() const noexcept
     {
-        return _ios;
+        return tensor.get();
     }
 
-private:
-    explicit MIO(IOS &&ios) noexcept : _ios(std::move(ios))
-    {
-        if (_ios.empty()) [[unlikely]]
-        {
-            LOG(WARNING, "Module IO is empty");
-        }
-        else
-        {
-            _ios.shrink_to_fit();
-        }
-    }
-
-    IOS _ios;
+    std::shared_ptr<core::Tensor> tensor;
+    const std::string_view attribute;
 };
+
+using MIOS = std::vector<std::shared_ptr<MIO>>;
+
+bool operator==(const MIOS &lhs, const MIOS &rhs) noexcept
+{
+    if (lhs.size() != rhs.size()) [[unlikely]]
+    {
+        return false;
+    }
+    return std::equal(lhs.cbegin(), lhs.cend(), rhs.cbegin(),
+        [](const std::shared_ptr<MIO> &a, const std::shared_ptr<MIO> &b) noexcept {
+            return a && b && a->attribute == b->attribute && a->tensor == b->tensor;
+        });
+}
 
 } // namespace module
 
