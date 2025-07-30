@@ -2,7 +2,7 @@
 
 namespace module {
 
-core::Status MNodeBuilderRegistry::registerNodeBuilder(std::string_view name, NodeBuilder builder,
+constexpr core::Status MNodeBuilderRegistry::registerNodeBuilder(std::string_view name, NodeBuilder builder,
     bool replace = false) noexcept
 {
     if (name.empty() || !builder) [[unlikely]]
