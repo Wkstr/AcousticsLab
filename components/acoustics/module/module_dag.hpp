@@ -123,8 +123,9 @@ public:
     bool computeExecutionOrder() const noexcept
     {
         std::priority_queue<MNode *, std::vector<MNode *>, MNode::Lower> pq;
+        auto in_degree = _in_degree;
 
-        for (const auto &id: _in_degree)
+        for (const auto &id: in_degree)
         {
             if (id.second == 0) [[likely]]
             {
@@ -140,8 +141,7 @@ public:
 
             for (auto *neighbor: _adj.at(node))
             {
-                const auto id = --_in_degree[neighbor];
-                if (id == 0) [[likely]]
+                if (--in_degree[neighbor] == 0) [[likely]]
                 {
                     pq.push(neighbor);
                 }
@@ -233,7 +233,7 @@ private:
     const std::string_view _name;
     std::forward_list<std::shared_ptr<module::MNode>> _nodes;
     std::unordered_map<MNode *, std::forward_list<MNode *>> _adj;
-    mutable std::unordered_map<MNode *, int> _in_degree;
+    std::unordered_map<MNode *, int> _in_degree;
     mutable std::vector<MNode *> _execution_order;
 };
 
