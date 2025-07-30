@@ -6,9 +6,11 @@
 
 #include "core/config_object.hpp"
 #include "core/logger.hpp"
+#include "core/reporter.hpp"
 #include "core/status.hpp"
 #include "core/tensor.hpp"
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -22,13 +24,13 @@ class MNode;
 class MNodeBuilderRegistry final
 {
 public:
-    using NodeBuilder = std::shared_ptr<MNode> (*)(const core::ConfigMap *, MIOS *, MIOS *, int);
+    using NodeBuilder = std::shared_ptr<MNode> (*)(const core::ConfigMap &, MIOS *, MIOS *, int);
     using NodeBuilderMap = std::unordered_map<std::string_view, NodeBuilder>;
 
     MNodeBuilderRegistry() = default;
     ~MNodeBuilderRegistry() = default;
 
-    inline static std::shared_ptr<MNode> getNode(std::string_view name, const core::ConfigMap *configs = nullptr,
+    inline static std::shared_ptr<MNode> getNode(std::string_view name, const core::ConfigMap &configs = {},
         MIOS *inputs = nullptr, MIOS *outputs = nullptr, int priority = 0) noexcept
     {
         auto it = _nodes.find(name);
@@ -66,7 +68,7 @@ public:
 
     virtual ~MNode() = default;
 
-    std::string_view name() const noexcept
+    const std::string &name() const noexcept
     {
         return _name;
     }
@@ -99,7 +101,7 @@ public:
     {
         for (const auto &input: _inputs)
         {
-            if (input->attribute == attribute)
+            if (input->attribute() == attribute)
             {
                 return input;
             }
@@ -120,7 +122,7 @@ public:
     {
         for (const auto &output: _outputs)
         {
-            if (output->attribute == attribute)
+            if (output->attribute() == attribute)
             {
                 return output;
             }
@@ -136,6 +138,15 @@ public:
     inline core::Status operator()() noexcept
     {
         return forward(_inputs, _outputs);
+    }
+
+    inline core::Status operator()(core::Reporter &reporter) noexcept
+    {
+        const auto start = std::chrono::steady_clock::now();
+        auto status = forward(_inputs, _outputs);
+        const auto end = std::chrono::steady_clock::now();
+        reporter.time_micro.insert_or_assign(_name, std::chrono::duration_cast<std::chrono::microseconds>(end - start));
+        return status;
     }
 
 protected:
