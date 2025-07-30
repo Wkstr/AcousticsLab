@@ -3,6 +3,7 @@
 #define MODEL_HPP
 
 #include "logger.hpp"
+#include "reporter.hpp"
 #include "status.hpp"
 #include "tensor.hpp"
 
@@ -50,14 +51,6 @@ public:
         const std::string version;
         std::unordered_map<int, std::string> labels;
         const std::variant<std::string, const void *> location;
-    };
-
-    struct Reporter final
-    {
-        Reporter() = default;
-        ~Reporter() = default;
-
-        std::unordered_map<std::string, int> perf;
     };
 
     class Graph final
@@ -189,8 +182,8 @@ public:
             const auto start = std::chrono::steady_clock::now();
             auto status = forward();
             const auto end = std::chrono::steady_clock::now();
-            std::string key = "Graph_" + _name + "_Forward_Ms";
-            reporter.perf[key] += std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+            reporter.time_micro.insert_or_assign(_name,
+                std::chrono::duration_cast<std::chrono::microseconds>(end - start));
             return status;
         }
 

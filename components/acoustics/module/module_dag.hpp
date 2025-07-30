@@ -220,7 +220,28 @@ public:
 
         for (auto *node: _execution_order)
         {
-            if (const auto &status = (*node)(); !status) [[unlikely]]
+            if (const auto &status = node->operator()(); !status) [[unlikely]]
+            {
+                return status;
+            }
+        }
+
+        return STATUS_OK();
+    }
+
+    inline core::Status operator()(core::Reporter &reporter) noexcept
+    {
+        if (_execution_order.empty()) [[unlikely]]
+        {
+            if (!computeExecutionOrder()) [[unlikely]]
+            {
+                return STATUS(EFAULT, "Failed to compute execution order for the DAG");
+            }
+        }
+
+        for (auto *node: _execution_order)
+        {
+            if (const auto &status = node->operator()(reporter); !status) [[unlikely]]
             {
                 return status;
             }
