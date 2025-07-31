@@ -160,42 +160,6 @@ public:
         return true;
     }
 
-    MNode *inputNode() const noexcept
-    {
-        if (_execution_order.empty()) [[unlikely]]
-        {
-            if (!computeExecutionOrder()) [[unlikely]]
-            {
-                LOG(ERROR, "Failed to compute execution order for the DAG");
-                return nullptr;
-            }
-            if (_execution_order.empty()) [[unlikely]]
-            {
-                LOG(ERROR, "No input node found in the DAG");
-                return nullptr;
-            }
-        }
-        return _execution_order.front();
-    }
-
-    MNode *outputNode() const noexcept
-    {
-        if (_execution_order.empty()) [[unlikely]]
-        {
-            if (!computeExecutionOrder()) [[unlikely]]
-            {
-                LOG(ERROR, "Failed to compute execution order for the DAG");
-                return nullptr;
-            }
-            if (_execution_order.empty()) [[unlikely]]
-            {
-                LOG(ERROR, "No input node found in the DAG");
-                return nullptr;
-            }
-        }
-        return _execution_order.back();
-    }
-
     MNode *node(std::string_view name) const noexcept
     {
         for (const auto &node: _nodes)
@@ -206,6 +170,11 @@ public:
             }
         }
         return nullptr;
+    }
+
+    const std::forward_list<std::shared_ptr<module::MNode>>& nodes() const noexcept
+    {
+        return _nodes;
     }
 
     inline core::Status operator()() noexcept
