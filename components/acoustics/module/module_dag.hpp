@@ -86,15 +86,8 @@ public:
         _execution_order.clear();
 
         _nodes.push_front(std::move(node));
-
-        if (_adj.find(ptr) == _adj.end()) [[likely]]
-        {
-            _adj[ptr] = {};
-        }
-        if (_in_degree.find(ptr) == _in_degree.end()) [[likely]]
-        {
-            _in_degree[ptr] = 0;
-        }
+        _adj.try_emplace(ptr, std::forward_list<MNode *> {});
+        _in_degree.try_emplace(ptr, 0);
 
         return ptr;
     }
@@ -172,7 +165,7 @@ public:
         return nullptr;
     }
 
-    const std::forward_list<std::shared_ptr<module::MNode>>& nodes() const noexcept
+    const std::forward_list<std::shared_ptr<module::MNode>> &nodes() const noexcept
     {
         return _nodes;
     }
