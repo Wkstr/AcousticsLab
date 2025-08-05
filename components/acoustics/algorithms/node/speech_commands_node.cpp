@@ -1,4 +1,4 @@
-#include "inference_node.hpp"
+#include "speech_commands_node.hpp"
 #include "core/logger.hpp"
 #include "hal/engine.hpp"
 
@@ -8,14 +8,14 @@
 
 namespace algorithms { namespace node {
 
-    static const char *TAG = "InferenceNode";
+    static const char *TAG = "SpeechCommandsNode";
 
-    InferenceNode::InferenceNode(const core::ConfigMap &configs, module::MIOS inputs, module::MIOS outputs,
+    SpeechCommandsNode::SpeechCommandsNode(const core::ConfigMap &configs, module::MIOS inputs, module::MIOS outputs,
         int priority)
-        : module::MNode("InferenceNode", std::move(inputs), std::move(outputs), priority), _engine(nullptr),
+        : module::MNode("SpeechCommandsNode", std::move(inputs), std::move(outputs), priority), _engine(nullptr),
           _model(nullptr), _graph(nullptr), _engine_id(1), _model_id(1), _graph_id(0), _initialized(false)
     {
-        LOG(DEBUG, "Creating InferenceNode with priority %d", priority);
+        LOG(DEBUG, "Creating SpeechCommandsNode with priority %d", priority);
 
         if (auto it = configs.find("engine_id"); it != configs.end())
         {
@@ -44,12 +44,12 @@ namespace algorithms { namespace node {
         LOG(INFO, "InferenceNode configured: engine_id=%d, model_id=%d, graph_id=%d", _engine_id, _model_id, _graph_id);
     }
 
-    InferenceNode::~InferenceNode()
+    SpeechCommandsNode::~SpeechCommandsNode()
     {
         LOG(DEBUG, "Destroying InferenceNode");
     }
 
-    core::Status InferenceNode::config(const core::ConfigMap &configs) noexcept
+    core::Status SpeechCommandsNode::config(const core::ConfigMap &configs) noexcept
     {
         LOG(DEBUG, "Reconfiguring InferenceNode");
 
@@ -105,7 +105,7 @@ namespace algorithms { namespace node {
         return STATUS_OK();
     }
 
-    core::Status InferenceNode::forward(const module::MIOS &inputs, module::MIOS &outputs) noexcept
+    core::Status SpeechCommandsNode::forward(const module::MIOS &inputs, module::MIOS &outputs) noexcept
     {
         if (!_initialized)
         {
@@ -162,7 +162,7 @@ namespace algorithms { namespace node {
         return STATUS_OK();
     }
 
-    core::Status InferenceNode::initialize() noexcept
+    core::Status SpeechCommandsNode::initialize() noexcept
     {
         LOG(DEBUG, "Initializing InferenceNode");
 
@@ -199,13 +199,25 @@ namespace algorithms { namespace node {
             return STATUS(ENOENT, "Graph not found");
         }
 
+        auto model_output_tensor = _graph->output(0);
+        if (model_output_tensor)
+        {
+            size_t actual_output_size = static_cast<size_t>(model_output_tensor->shape().dot());
+            LOG(INFO, "Model actual output size: %zu classes", actual_output_size);
+        }
+        else
+        {
+            LOG(WARNING, "Could not get model output tensor information");
+        }
+
         _initialized = true;
-        LOG(INFO, "InferenceNode initialized successfully");
+        LOG(INFO, "SpeechCommandsNode initialized successfully");
 
         return STATUS_OK();
     }
 
-    core::Status InferenceNode::validateTensors(const module::MIOS &inputs, const module::MIOS &outputs) const noexcept
+    core::Status SpeechCommandsNode::validateTensors(const module::MIOS &inputs,
+        const module::MIOS &outputs) const noexcept
     {
         if (inputs.size() != 1)
         {
@@ -234,17 +246,29 @@ namespace algorithms { namespace node {
         }
 
         auto model_output_tensor = _graph->output(0);
-        if (output_tensor->shape().dot() != model_output_tensor->shape().dot())
+        size_t model_output_size = static_cast<size_t>(model_output_tensor->shape().dot());
+        size_t dag_output_size = static_cast<size_t>(output_tensor->shape().dot());
+
+        if (dag_output_size < model_output_size)
         {
-            LOG(ERROR, "Output tensor size mismatch: expected %d, got %d", model_output_tensor->shape().dot(),
-                output_tensor->shape().dot());
-            return STATUS(EINVAL, "Output tensor size mismatch");
+            LOG(ERROR, "Output tensor too small: model needs %zu, DAG provides %zu", model_output_size,
+                dag_output_size);
+            return STATUS(EINVAL, "Output tensor too small for model output");
+        }
+        else if (dag_output_size > model_output_size)
+        {
+            LOG(INFO, "Output tensor larger than model output: model=%zu, DAG=%zu (will use first %zu elements)",
+                model_output_size, dag_output_size, model_output_size);
+        }
+        else
+        {
+            LOG(INFO, "Output tensor size matches model output: %zu elements", model_output_size);
         }
 
         return STATUS_OK();
     }
 
-    core::Status InferenceNode::copyInputData(core::Tensor *input_tensor,
+    core::Status SpeechCommandsNode::copyInputData(core::Tensor *input_tensor,
         core::Tensor *model_input_tensor) const noexcept
     {
         const size_t elements_to_copy = std::min(static_cast<size_t>(input_tensor->shape().dot()),
@@ -334,16 +358,20 @@ namespace algorithms { namespace node {
         return STATUS_OK();
     }
 
-    core::Status InferenceNode::copyOutputData(core::Tensor *model_output_tensor,
+    core::Status SpeechCommandsNode::copyOutputData(core::Tensor *model_output_tensor,
         core::Tensor *output_tensor) const noexcept
     {
-        const size_t elements_to_copy = std::min(static_cast<size_t>(model_output_tensor->shape().dot()),
-            static_cast<size_t>(output_tensor->shape().dot()));
+        const size_t model_output_size = static_cast<size_t>(model_output_tensor->shape().dot());
+        const size_t output_tensor_capacity = static_cast<size_t>(output_tensor->shape().dot());
+        const size_t elements_to_copy = std::min(model_output_size, output_tensor_capacity);
 
         if (elements_to_copy == 0)
         {
             return STATUS(EINVAL, "No elements to copy");
         }
+
+        LOG(DEBUG, "Model output size: %zu, Output tensor capacity: %zu, Copying: %zu elements", model_output_size,
+            output_tensor_capacity, elements_to_copy);
 
         if (model_output_tensor->dtype() == core::Tensor::Type::Float32)
         {
@@ -405,18 +433,47 @@ namespace algorithms { namespace node {
             return STATUS(ENOTSUP, "Unsupported model output tensor data type");
         }
 
+        if (output_tensor_capacity > model_output_size && output_tensor->dtype() == core::Tensor::Type::Float32)
+        {
+            float *output_data = output_tensor->data<float>();
+            if (output_data)
+            {
+                // Zero out the unused portion
+                std::memset(output_data + model_output_size, 0,
+                    (output_tensor_capacity - model_output_size) * sizeof(float));
+                LOG(DEBUG, "Cleared unused portion of output tensor: elements %zu-%zu", model_output_size,
+                    output_tensor_capacity - 1);
+            }
+        }
+
         return STATUS_OK();
     }
 
-    std::shared_ptr<module::MNode> createInferenceNode(const core::ConfigMap &configs, module::MIOS *inputs,
+    size_t SpeechCommandsNode::getModelOutputSize() const noexcept
+    {
+        if (!_initialized || !_graph)
+        {
+            return 0;
+        }
+
+        auto model_output_tensor = _graph->output(0);
+        if (!model_output_tensor)
+        {
+            return 0;
+        }
+
+        return static_cast<size_t>(model_output_tensor->shape().dot());
+    }
+
+    std::shared_ptr<module::MNode> createSpeechCommandsNode(const core::ConfigMap &configs, module::MIOS *inputs,
         module::MIOS *outputs, int priority)
     {
-        LOG(DEBUG, "Creating InferenceNode via builder function");
+        LOG(DEBUG, "Creating SpeechCommandsNode via builder function");
 
         module::MIOS input_mios = inputs ? *inputs : module::MIOS {};
         module::MIOS output_mios = outputs ? *outputs : module::MIOS {};
 
-        return std::make_shared<InferenceNode>(configs, std::move(input_mios), std::move(output_mios), priority);
+        return std::make_shared<SpeechCommandsNode>(configs, std::move(input_mios), std::move(output_mios), priority);
     }
 
 }} // namespace algorithms::node

@@ -1,10 +1,13 @@
 #include "sound_classification_dag.hpp"
+#include "../node/speech_commands_node.hpp"
 #include "core/logger.hpp"
+#include "hal/engine.hpp"
 #include "module/module_dag.hpp"
 #include "module/module_node.hpp"
 
 #include <algorithm>
 #include <esp_heap_caps.h>
+#include <string>
 
 namespace algorithms { namespace dag {
 
@@ -19,10 +22,15 @@ namespace algorithms { namespace dag {
             return nullptr;
         }
 
-        auto dag = std::make_shared<module::MDAG>("SoundClassificationDAG");
+        auto dag = std::make_shared<SoundClassificationDAG>("SoundClassificationDAG");
 
         size_t output_size = getOutputSize(configs);
-        LOG(DEBUG, "DAG output size: %zu classes", output_size);
+        if (output_size == 0)
+        {
+            LOG(ERROR, "Failed to determine model output size - cannot create DAG");
+            return nullptr;
+        }
+        LOG(INFO, "DAG will be created with output size: %zu classes", output_size);
 
         auto input_tensor = createInputTensor();
         auto feature_tensor = createFeatureTensor();
@@ -98,13 +106,13 @@ namespace algorithms { namespace dag {
     std::shared_ptr<module::MNode> SoundClassificationDAGBuilder::createFeatureExtractorNode(
         const core::ConfigMap &configs, std::shared_ptr<module::MIO> input_mio, std::shared_ptr<module::MIO> output_mio)
     {
-        LOG(DEBUG, "Creating ESPFeatureExtractorNode");
+        LOG(DEBUG, "Creating %s", FEATURE_EXTRACTOR_NODE_NAME);
 
         const auto &node_builders = module::MNodeBuilderRegistry::getNodeBuilderMap();
-        auto it = node_builders.find("ESPFeatureExtractorNode");
+        auto it = node_builders.find(FEATURE_EXTRACTOR_NODE_NAME);
         if (it == node_builders.end())
         {
-            LOG(ERROR, "ESPFeatureExtractorNode builder not found in registry");
+            LOG(ERROR, "%s builder not found in registry", FEATURE_EXTRACTOR_NODE_NAME);
             return nullptr;
         }
 
@@ -114,24 +122,24 @@ namespace algorithms { namespace dag {
         auto node = it->second(configs, &inputs, &outputs, 1);
         if (!node)
         {
-            LOG(ERROR, "Failed to create ESPFeatureExtractorNode");
+            LOG(ERROR, "Failed to create %s", FEATURE_EXTRACTOR_NODE_NAME);
             return nullptr;
         }
 
-        LOG(DEBUG, "ESPFeatureExtractorNode created successfully");
+        LOG(DEBUG, "%s created successfully", FEATURE_EXTRACTOR_NODE_NAME);
         return node;
     }
 
     std::shared_ptr<module::MNode> SoundClassificationDAGBuilder::createInferenceNode(const core::ConfigMap &configs,
         std::shared_ptr<module::MIO> input_mio, std::shared_ptr<module::MIO> output_mio)
     {
-        LOG(DEBUG, "Creating InferenceNode");
+        LOG(DEBUG, "Creating %s", INFERENCE_NODE_NAME);
 
         const auto &node_builders = module::MNodeBuilderRegistry::getNodeBuilderMap();
-        auto it = node_builders.find("InferenceNode");
+        auto it = node_builders.find(INFERENCE_NODE_NAME);
         if (it == node_builders.end())
         {
-            LOG(ERROR, "InferenceNode builder not found in registry");
+            LOG(ERROR, "%s builder not found in registry", INFERENCE_NODE_NAME);
             return nullptr;
         }
 
@@ -141,11 +149,11 @@ namespace algorithms { namespace dag {
         auto node = it->second(configs, &inputs, &outputs, 2);
         if (!node)
         {
-            LOG(ERROR, "Failed to create InferenceNode");
+            LOG(ERROR, "Failed to create %s", INFERENCE_NODE_NAME);
             return nullptr;
         }
 
-        LOG(DEBUG, "InferenceNode created successfully");
+        LOG(DEBUG, "%s created successfully", INFERENCE_NODE_NAME);
         return node;
     }
 
@@ -183,11 +191,26 @@ namespace algorithms { namespace dag {
         {
             if (auto output_classes = std::get_if<int>(&it->second))
             {
+                LOG(INFO, "Using explicitly configured output classes: %d", *output_classes);
                 return static_cast<size_t>(std::max(1, *output_classes));
             }
         }
+        return 100;
+    }
 
-        return OUTPUT_CLASSES;
+    size_t SoundClassificationDAG::getActualOutputSize() const noexcept
+    {
+        auto output_node = node("SpeechCommandsNode");
+        if (output_node && !output_node->outputs().empty())
+        {
+            auto output_mio = output_node->outputs()[0];
+            if (output_mio && output_mio->operator()())
+            {
+                auto output_tensor = output_mio->operator()();
+                return static_cast<size_t>(output_tensor->shape().dot());
+            }
+        }
+        return 0;
     }
 
     core::Status SoundClassificationDAGBuilder::validateConfig(const core::ConfigMap &configs)

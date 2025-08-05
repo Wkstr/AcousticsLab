@@ -2,9 +2,12 @@
 #include <freertos/task.h>
 #include <freertos/timers.h>
 
-#include "algorithms/dag/sound_classification_dag.hpp"
+#include "hal/engine.hpp"
 #include "hal/sensor.hpp"
 #include "module/module_dag.hpp"
+
+// Include for SoundClassificationDAG
+#include "../../components/acoustics/algorithms/dag/sound_classification_dag.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -13,8 +16,29 @@
 #include <iomanip>
 #include <iostream>
 
-static constexpr int kNumLabels = 3;
-static const char *kLabels[kNumLabels] = { "Background Noise", "one", "two" };
+std::vector<std::string> generateDynamicLabels(size_t num_classes)
+{
+    std::vector<std::string> labels;
+    labels.reserve(num_classes);
+
+    // Default label mapping
+    const std::vector<std::string> default_labels = { "Background Noise", "one", "two", "three", "four", "five", "six",
+        "seven", "eight", "nine", "ten", "unknown" };
+
+    for (size_t i = 0; i < num_classes; ++i)
+    {
+        if (i < default_labels.size())
+        {
+            labels.push_back(default_labels[i]);
+        }
+        else
+        {
+            labels.push_back("class_" + std::to_string(i));
+        }
+    }
+
+    return labels;
+}
 
 static constexpr size_t ANALYSIS_WINDOW_SAMPLES = 44032;
 static constexpr size_t INFERENCE_STRIDE_SAMPLES = 22016;
@@ -38,6 +62,14 @@ bool initializeSystem()
     bridge::__REGISTER_INTERNAL_MODULE_NODE_BUILDER__();
     bridge::__REGISTER_EXTERNAL_MODULE_NODE_BUILDER__();
     bridge::__REGISTER_MODULE_DAG_BUILDER__();
+
+    const auto &engines = hal::EngineRegistry::getEngineMap();
+    std::cout << "Available engines: " << engines.size() << std::endl;
+    for (const auto &[id, engine]: engines)
+    {
+        std::cout << "  - Engine ID: " << id << ", Name: " << engine->info().name << std::endl;
+    }
+
     std::cout << "All components registered successfully" << std::endl;
 
     return true;
@@ -66,39 +98,42 @@ hal::Sensor *initializeSensor()
     return mic;
 }
 
-std::shared_ptr<module::MDAG> createSoundClassificationDAG()
+std::shared_ptr<module::MDAG> createDAG(const std::string &dag_name, const core::ConfigMap &configs)
 {
-    std::cout << "Creating SoundClassificationDAG..." << std::endl;
+    std::cout << "Creating DAG: " << dag_name << "..." << std::endl;
 
-    core::ConfigMap configs
-        = { { "engine_id", 1 }, { "model_id", 1 }, { "graph_id", 0 }, { "output_classes", kNumLabels } };
+    const auto &dag_builders = module::MDAGBuilderRegistry::getDAGBuilderMap();
+    std::cout << "Available DAG builders: " << dag_builders.size() << std::endl;
+    for (const auto &[name, builder]: dag_builders)
+    {
+        std::cout << "  - " << name << std::endl;
+    }
 
-    auto dag = module::MDAGBuilderRegistry::getDAG("SoundClassificationDAG", configs);
+    const auto &node_builders = module::MNodeBuilderRegistry::getNodeBuilderMap();
+    std::cout << "Available node builders: " << node_builders.size() << std::endl;
+    for (const auto &[name, builder]: node_builders)
+    {
+        std::cout << "  - " << name << std::endl;
+    }
+
+    auto dag = module::MDAGBuilderRegistry::getDAG(dag_name, configs);
     if (!dag)
     {
-        std::cout << "ERROR: Failed to create SoundClassificationDAG" << std::endl;
+        std::cout << "ERROR: Failed to create DAG: " << dag_name << std::endl;
         return nullptr;
     }
 
-    std::cout << "SoundClassificationDAG created successfully" << std::endl;
+    std::cout << "DAG created successfully: " << dag_name << std::endl;
 
-    auto input_node = dag->inputNode();
-    auto output_node = dag->outputNode();
-
-    if (!input_node || !output_node)
-    {
-        std::cout << "ERROR: DAG missing input or output nodes" << std::endl;
-        return nullptr;
-    }
-
-    std::cout << "DAG validation successful:" << std::endl;
-    std::cout << "  - Input node: " << input_node->name() << std::endl;
-    std::cout << "  - Output node: " << output_node->name() << std::endl;
+    // Count nodes (forward_list doesn't have size())
+    size_t node_count = std::distance(dag->nodes().begin(), dag->nodes().end());
+    std::cout << "DAG contains " << node_count << " nodes" << std::endl;
 
     return dag;
 }
 
-void processClassificationResults(core::Tensor *output_tensor, int classification_count)
+void processClassificationResults(core::Tensor *output_tensor, int classification_count,
+    std::shared_ptr<module::MDAG> dag)
 {
     std::cout << "\n--- Classification Results #" << classification_count << " ---" << std::endl;
 
@@ -108,11 +143,72 @@ void processClassificationResults(core::Tensor *output_tensor, int classificatio
         return;
     }
 
-    size_t output_size = output_tensor->shape().dot();
-    size_t num_classes = std::min(output_size, static_cast<size_t>(kNumLabels));
+    // Determine actual output size by finding the effective data range
+    // Since we can't use dynamic_cast (RTTI disabled), we'll analyze the output data
+    size_t tensor_capacity = output_tensor->shape().dot();
+    size_t num_classes = tensor_capacity; // Default to full capacity
 
-    std::cout << "Output tensor info: size=" << output_size << ", processing " << num_classes << " classes"
-              << std::endl;
+    if (output_tensor->dtype() == core::Tensor::Type::Float32)
+    {
+        const float *output_data = output_tensor->data<float>();
+
+        // Find the actual output size by looking for the pattern where
+        // valid outputs are followed by zeros (unused capacity)
+        size_t last_non_zero = 0;
+        for (size_t i = 0; i < tensor_capacity; ++i)
+        {
+            if (output_data[i] != 0.0f)
+            {
+                last_non_zero = i;
+            }
+        }
+
+        // If we found non-zero values, the actual size is last_non_zero + 1
+        // But we need to be careful about models that legitimately output zeros
+        if (last_non_zero < tensor_capacity - 1)
+        {
+            // Check if there's a clear boundary (many consecutive zeros at the end)
+            size_t consecutive_zeros = 0;
+            for (size_t i = last_non_zero + 1; i < tensor_capacity; ++i)
+            {
+                if (output_data[i] == 0.0f)
+                {
+                    consecutive_zeros++;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            // If we have many consecutive zeros at the end, assume that's unused capacity
+            if (consecutive_zeros >= 10) // At least 10 consecutive zeros
+            {
+                num_classes = last_non_zero + 1;
+                std::cout << "Detected actual output size: " << num_classes << " classes (capacity: " << tensor_capacity
+                          << ")" << std::endl;
+            }
+            else
+            {
+                std::cout << "Using full tensor capacity: " << tensor_capacity << " classes" << std::endl;
+            }
+        }
+        else
+        {
+            std::cout << "Using full tensor capacity: " << tensor_capacity << " classes" << std::endl;
+        }
+    }
+    else
+    {
+        std::cout << "WARNING: Unsupported tensor type, using full capacity: " << tensor_capacity << " classes"
+                  << std::endl;
+    }
+
+    // Generate dynamic labels based on actual model output size
+    auto labels = generateDynamicLabels(num_classes);
+
+    std::cout << "Output tensor info: capacity=" << output_tensor->shape().dot() << ", actual size=" << num_classes
+              << " classes" << std::endl;
 
     float max_score = -std::numeric_limits<float>::infinity();
     int max_index = 0;
@@ -130,7 +226,7 @@ void processClassificationResults(core::Tensor *output_tensor, int classificatio
         for (size_t i = 0; i < num_classes; ++i)
         {
             float score = output_data[i];
-            std::cout << "  " << kLabels[i] << ": " << std::fixed << std::setprecision(6) << score << std::endl;
+            std::cout << "  " << labels[i] << ": " << std::fixed << std::setprecision(6) << score << std::endl;
 
             if (score > max_score)
             {
@@ -146,7 +242,7 @@ void processClassificationResults(core::Tensor *output_tensor, int classificatio
         return;
     }
 
-    std::cout << "\n🎯 Predicted class: " << kLabels[max_index] << " (score: " << std::fixed << std::setprecision(6)
+    std::cout << "\n🎯 Predicted class: " << labels[max_index] << " (score: " << std::fixed << std::setprecision(6)
               << max_score << ")" << std::endl;
     std::cout << "--- End Results ---\n" << std::endl;
 }
@@ -168,14 +264,12 @@ void audioProcessingLoop(hal::Sensor *mic, std::shared_ptr<module::MDAG> dag)
 
     memset(analysis_window.get(), 0, ANALYSIS_WINDOW_SAMPLES * sizeof(int16_t));
 
-    auto input_node = dag->inputNode();
-    if (!input_node || input_node->inputs().empty())
+    auto input_tensor = dag->getInputTensor(0);
+    if (!input_tensor)
     {
-        std::cout << "ERROR: DAG input node or input tensor not available" << std::endl;
+        std::cout << "ERROR: DAG input tensor not available" << std::endl;
         return;
     }
-
-    auto input_tensor = input_node->inputs()[0]->operator()();
     if (!input_tensor)
     {
         std::cout << "ERROR: Failed to get DAG input tensor" << std::endl;
@@ -253,15 +347,13 @@ void audioProcessingLoop(hal::Sensor *mic, std::shared_ptr<module::MDAG> dag)
             auto dag_time = std::chrono::duration_cast<std::chrono::milliseconds>(dag_end - dag_start).count();
             std::cout << "DAG execution time: " << dag_time << "ms" << std::endl;
 
-            auto output_node = dag->outputNode();
-            if (!output_node || output_node->outputs().empty())
+            auto output_tensor = dag->getOutputTensor(0);
+            if (!output_tensor)
             {
-                std::cout << "ERROR: DAG output node or output tensor not available" << std::endl;
+                std::cout << "ERROR: DAG output tensor not available" << std::endl;
                 continue;
             }
-
-            auto output_tensor = output_node->outputs()[0]->operator()();
-            processClassificationResults(output_tensor, classification_count);
+            processClassificationResults(output_tensor.get(), classification_count, dag);
 
             auto total_time = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - process_start)
@@ -293,7 +385,9 @@ extern "C" void app_main()
         return;
     }
 
-    auto dag = createSoundClassificationDAG();
+    // Create DAG using generic interface
+    core::ConfigMap dag_configs = { { "engine_id", 1 }, { "model_id", 1 }, { "graph_id", 0 } };
+    auto dag = createDAG("SoundClassificationDAG", dag_configs);
     if (!dag)
     {
         std::cout << "ERROR: DAG creation failed" << std::endl;

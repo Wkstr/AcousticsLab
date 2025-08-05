@@ -1,6 +1,6 @@
 #include "core/logger.hpp"
 #include "module/module_node.hpp"
-#include "node/inference_node.hpp"
+#include "node/speech_commands_node.hpp"
 
 namespace bridge {
 
@@ -10,17 +10,17 @@ void __REGISTER_INTERNAL_MODULE_NODE_BUILDER__()
 
     LOG(INFO, "Registering internal module node builders");
 
-    // Register InferenceNode
-    auto status = module::MNodeBuilderRegistry::registerNodeBuilder("InferenceNode",
-        algorithms::node::createInferenceNode, false);
+    // Register SpeechCommandsNode
+    auto status = module::MNodeBuilderRegistry::registerNodeBuilder("SpeechCommandsNode",
+        algorithms::node::createSpeechCommandsNode, false);
 
     if (!status)
     {
-        LOG(ERROR, "Failed to register InferenceNode: %s", status.message().c_str());
+        LOG(ERROR, "Failed to register SpeechCommandsNode: %s", status.message().c_str());
     }
     else
     {
-        LOG(INFO, "Successfully registered InferenceNode");
+        LOG(INFO, "Successfully registered SpeechCommandsNode");
     }
 
     // Log all registered nodes for debugging

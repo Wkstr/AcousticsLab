@@ -11,23 +11,63 @@
 #include <memory>
 #include <string>
 
+namespace algorithms { namespace node {
+    class SpeechCommandsNode;
+}} // namespace algorithms::node
+
 namespace algorithms { namespace dag {
+
+    class SoundClassificationDAG final: public module::MDAG
+    {
+    public:
+        explicit SoundClassificationDAG(std::string_view name) noexcept : module::MDAG(name) { }
+
+        std::shared_ptr<core::Tensor> getInputTensor(size_t index = 0) const noexcept override
+        {
+            auto input_node = node("ESPFeatureExtractorNode");
+            if (input_node && !input_node->inputs().empty() && index < input_node->inputs().size())
+            {
+                auto mio = input_node->inputs()[index];
+                if (mio && mio->operator()())
+                {
+                    return std::shared_ptr<core::Tensor>(mio->operator()(), [](core::Tensor *) { });
+                }
+            }
+            return nullptr;
+        }
+
+        std::shared_ptr<core::Tensor> getOutputTensor(size_t index = 0) const noexcept override
+        {
+            auto output_node = node("SpeechCommandsNode");
+            if (output_node && !output_node->outputs().empty() && index < output_node->outputs().size())
+            {
+                auto mio = output_node->outputs()[index];
+                if (mio && mio->operator()())
+                {
+                    return std::shared_ptr<core::Tensor>(mio->operator()(), [](core::Tensor *) { });
+                }
+            }
+            return nullptr;
+        }
+        size_t getActualOutputSize() const noexcept;
+    };
 
     class SoundClassificationDAGBuilder
     {
     public:
         static std::shared_ptr<module::MDAG> create(const core::ConfigMap &configs);
+        static constexpr const char *FEATURE_EXTRACTOR_NODE_NAME = "ESPFeatureExtractorNode";
+        static constexpr const char *INFERENCE_NODE_NAME = "SpeechCommandsNode";
 
     private:
         static constexpr size_t AUDIO_SAMPLES = 44032;
         static constexpr size_t FEATURE_COUNT = 9976;
-        static constexpr size_t OUTPUT_CLASSES = 3;
 
         static std::shared_ptr<core::Tensor> createInputTensor();
 
         static std::shared_ptr<core::Tensor> createFeatureTensor();
 
-        static std::shared_ptr<core::Tensor> createOutputTensor(size_t output_size = OUTPUT_CLASSES);
+        static std::shared_ptr<core::Tensor> createOutputTensor(size_t output_size = 100);
 
         static std::shared_ptr<module::MNode> createFeatureExtractorNode(const core::ConfigMap &configs,
             std::shared_ptr<module::MIO> input_mio, std::shared_ptr<module::MIO> output_mio);

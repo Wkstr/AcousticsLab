@@ -83,7 +83,8 @@ namespace porting { namespace algorithms { namespace node {
                 float real = _fft_input_buffer[j * 2 + 0];
                 float imag = _fft_input_buffer[j * 2 + 1];
                 float mag = sqrtf(real * real + imag * imag);
-                current_log_features[j] = logf(mag < 1e-12f ? 1e-12f : mag);
+                current_log_features[j]
+                    = logf(mag < std::numeric_limits<float>::epsilon() ? std::numeric_limits<float>::epsilon() : mag);
             }
         }
 
@@ -194,7 +195,7 @@ namespace porting { namespace algorithms { namespace node {
         variance /= total_features;
         float std_dev = sqrtf(variance);
 
-        const float epsilon = 0.00009999999747378752f;
+        const float epsilon = std::numeric_limits<float>::epsilon();
         float inv_std = 1.0f / (std_dev + epsilon);
 
         for (size_t i = 0; i < total_features; ++i)

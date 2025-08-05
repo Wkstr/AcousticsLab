@@ -1,6 +1,6 @@
 #pragma once
-#ifndef INFERENCE_NODE_HPP
-#define INFERENCE_NODE_HPP
+#ifndef SPEECH_COMMANDS_NODE_HPP
+#define SPEECH_COMMANDS_NODE_HPP
 
 #include "core/config_object.hpp"
 #include "core/logger.hpp"
@@ -15,17 +15,19 @@
 
 namespace algorithms { namespace node {
 
-    class InferenceNode final: public module::MNode
+    class SpeechCommandsNode final: public module::MNode
     {
     public:
-        InferenceNode(const core::ConfigMap &configs, module::MIOS inputs, module::MIOS outputs, int priority);
+        SpeechCommandsNode(const core::ConfigMap &configs, module::MIOS inputs, module::MIOS outputs, int priority);
 
-        ~InferenceNode() override;
+        ~SpeechCommandsNode() override;
 
         core::Status config(const core::ConfigMap &configs) noexcept override;
 
     protected:
         core::Status forward(const module::MIOS &inputs, module::MIOS &outputs) noexcept override;
+
+        size_t getModelOutputSize() const noexcept;
 
     private:
         std::shared_ptr<hal::Engine> _engine;
@@ -47,7 +49,7 @@ namespace algorithms { namespace node {
         core::Status copyOutputData(core::Tensor *model_output_tensor, core::Tensor *output_tensor) const noexcept;
     };
 
-    std::shared_ptr<module::MNode> createInferenceNode(const core::ConfigMap &configs, module::MIOS *inputs,
+    std::shared_ptr<module::MNode> createSpeechCommandsNode(const core::ConfigMap &configs, module::MIOS *inputs,
         module::MIOS *outputs, int priority);
 
 }} // namespace algorithms::node
