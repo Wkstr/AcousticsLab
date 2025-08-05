@@ -4,4 +4,3 @@ pandas
 tensorflow
 tensorflowjs
 scipy
-tflite

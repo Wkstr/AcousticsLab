@@ -8,12 +8,10 @@ fully quantized and optimized TensorFlow Lite (`.tflite`) model suitable for
 deployment on microcontroller units (MCUs).
 
 The conversion process involves several key stages:
-1.  **TF.js to Keras**: Converts the input TF.js model (`model.json`) into an
-    intermediate Keras H5 model (`.h5`).
-2.  **Architecture Optimization**: Reconstructs the Keras model architecture by
-    replacing computationally expensive Dense layers with equivalent,
-    but more efficient, 1x1 Convolutional layers. This is a critical
-    optimization for on-device performance.
+1.  **TF.js to Keras**: Converts the input TF.js model (`model.json`) into an intermediate Keras H5 model (`.h5`).
+2.  **Architecture Optimization**: The Keras model architecture was restructured
+    by replacing the Dense layer with an equivalent 1x1 convolutional layer. 
+    This enables correct inference results on the device.
 3.  **Weight Transfer**: Carefully transfers the learned weights from the original
     model to the new, optimized architecture.
 4.  **Post-Training Quantization**: Converts the model to TensorFlow Lite format
@@ -29,14 +27,10 @@ Usage:
     The script can be run from the command line, providing paths to the
     necessary input files and desired output locations.
 
-    Basic usage:
+    Usage:
     $ python convert_speech_model.py --tfjs_model /path/to/model.json \\
-                                     --metadata /path/to/metadata.json \\
+                                     --metadata /path/to/metadata.json \\ (Optional)
                                      --wav_dir /path/to/audio_data
-
-    Simplified usage:
-    $ python convert_speech_model.py --files model.json metadata.json
-
     For a full list of options, run:
     $ python convert_speech_model.py --help
 """
@@ -45,12 +39,11 @@ import tensorflow as tf
 import numpy as np
 import logging
 import argparse
-import os
-import glob
 import sys
 import json
+import random
+import mimetypes
 from pathlib import Path
-from enum import Enum
 from typing import Optional, List, Dict, Any, Iterator
 
 from scipy.io import wavfile
@@ -78,16 +71,16 @@ DEFAULT_TFLITE_OUTPUT_PATH = (
 DEFAULT_WAV_INPUT_DIR = _PROJECT_ROOT / "datasound"
 DEFAULT_PREPROCESSING_MODEL_PATH = _PROJECT_ROOT / "models" / "preprocessing.tflite"
 
+REQUIRED_SAMPLES = 100
 
-class ConversionState(Enum):
-    INITIALIZED = "initialized"
-    TFJS_CONVERTED = "tfjs_converted"
-    METADATA_LOADED = "metadata_loaded"
-    MODELS_CREATED = "models_created"
-    WEIGHTS_TRANSFERRED = "weights_transferred"
-    QUANTIZED = "quantized"
-    COMPLETED = "completed"
-    FAILED = "failed"
+
+class ConversionStepFailedError(Exception):
+    def __init__(
+        self, step_name: str, message: str, original_exception: Exception = None
+    ):
+        self.step_name = step_name
+        self.original_exception = original_exception
+        super().__init__(f"Step '{step_name}' failed: {message}")
 
 
 class ModelConverter:
@@ -100,7 +93,7 @@ class ModelConverter:
         wav_input_dir: str = str(DEFAULT_WAV_INPUT_DIR),
         preprocessing_model_path: str = str(DEFAULT_PREPROCESSING_MODEL_PATH),
     ):
-        paths = {
+        path_configs = {
             "tfjs_model_path": tfjs_model_path,
             "metadata_path": metadata_path,
             "keras_output_path": keras_output_path,
@@ -109,125 +102,305 @@ class ModelConverter:
             "preprocessing_model_path": preprocessing_model_path,
         }
 
-        for param_name, path in paths.items():
-            if not isinstance(path, str):
-                raise TypeError(f"{param_name} must be a string, got {type(path)}")
-            if not path or not path.strip():
-                raise ValueError(f"{param_name} cannot be empty or None")
+        for attr_name, path_value in path_configs.items():
+            if not isinstance(path_value, str) or not path_value.strip():
+                raise ValueError(f"{attr_name} must be a non-empty string")
+            setattr(self, attr_name, Path(path_value.strip()))
 
-        # Public file path attributes (assigned early for easy access)
-        self.tfjs_model_path = tfjs_model_path.strip()
-        self.metadata_path = metadata_path.strip()
-        self.keras_output_path = keras_output_path.strip()
-        self.tflite_output_path = tflite_output_path.strip()
-        self.wav_input_dir = wav_input_dir.strip()
-        self.preprocessing_model_path = preprocessing_model_path.strip()
-
-        # Private attributes for internal state management
         self._model_info: Dict[str, Any] = {}
         self._labels: List[str] = []
-        self._conversion_state: ConversionState = ConversionState.INITIALIZED
+        self._num_classes: Optional[int] = None
         self._original_model: Optional[tf.keras.Model] = None
         self._final_model: Optional[tf.keras.Model] = None
         self._tflite_model: Optional[bytes] = None
 
-        logging.info(
-            f"🔧 ModelConverter initialized with state: {self._conversion_state.value}"
-        )
+        logging.info("🔧 ModelConverter initialized successfully")
 
-    def _validate_state(self, expected_state: ConversionState) -> None:
-        if self._conversion_state != expected_state:
-            error_msg = f"Invalid operation: expected state '{expected_state.value}', but current state is '{self._conversion_state.value}'"
+    def _check_keras_model_exists(self) -> None:
+        if not self.keras_output_path.exists():
+            raise ConversionStepFailedError(
+                "dependency_check",
+                f"Keras model not found at {self.keras_output_path}. "
+                "Run convert_tfjs_to_keras() first.",
+            )
 
-            if self._conversion_state == ConversionState.FAILED:
-                error_msg += "\nThe conversion process has failed. Please create a new ModelConverter instance."
-            elif self._conversion_state == ConversionState.COMPLETED:
-                error_msg += (
-                    "\nThe conversion process has already completed successfully."
+    def _check_models_created(self) -> None:
+        if self._original_model is None or self._final_model is None:
+            raise ConversionStepFailedError(
+                "dependency_check",
+                "Model architectures not created. Run create_models() first.",
+            )
+
+    def _infer_num_classes_from_model_json(self) -> int:
+        try:
+            logging.info("🔄 Inferring number of classes from model.json...")
+
+            with open(self.tfjs_model_path, "r", encoding="utf-8") as f:
+                model_config = json.load(f)
+
+            if "modelTopology" not in model_config:
+                raise ValueError("No 'modelTopology' found in model.json")
+
+            topology = model_config["modelTopology"]
+            config = topology.get("config", {})
+            layers = config.get("layers", [])
+
+            if not layers:
+                raise ValueError("No layers found in model config")
+
+            output_layers = config.get("output_layers", [])
+            if output_layers:
+                output_layer_name = output_layers[0][0]
+                logging.info(f"Found output layer specification: {output_layer_name}")
+
+                for layer in layers:
+                    if layer.get("name") == output_layer_name:
+                        if layer.get("class_name") == "Sequential":
+                            seq_config = layer.get("config", {})
+                            seq_layers = seq_config.get("layers", [])
+                            if seq_layers:
+                                last_seq_layer = seq_layers[-1]
+                                if last_seq_layer.get("class_name") == "Dense":
+                                    units = last_seq_layer.get("config", {}).get(
+                                        "units"
+                                    )
+                                    if units is not None:
+                                        logging.info(
+                                            f"Found output Dense layer in Sequential with {units} units"
+                                        )
+                                        return units
+                        elif layer.get("class_name") == "Dense":
+                            units = layer.get("config", {}).get("units")
+                            if units is not None:
+                                logging.info(
+                                    f"Found output Dense layer with {units} units"
+                                )
+                                return units
+
+            for layer in reversed(layers):
+                layer_config = layer.get("config", {})
+                class_name = layer.get("class_name", "")
+
+                if (
+                    class_name == "Dense"
+                    and layer_config.get("activation") == "softmax"
+                ):
+                    units = layer_config.get("units")
+                    if units is not None:
+                        logging.info(f"Found softmax Dense layer with {units} units")
+                        return units
+                elif class_name == "Sequential":
+                    seq_layers = layer_config.get("layers", [])
+                    for seq_layer in reversed(seq_layers):
+                        if (
+                            seq_layer.get("class_name") == "Dense"
+                            and seq_layer.get("config", {}).get("activation")
+                            == "softmax"
+                        ):
+                            units = seq_layer.get("config", {}).get("units")
+                            if units is not None:
+                                logging.info(
+                                    f"Found softmax Dense layer in Sequential with {units} units"
+                                )
+                                return units
+
+            for layer in reversed(layers):
+                layer_config = layer.get("config", {})
+                class_name = layer.get("class_name", "")
+
+                if class_name == "Dense":
+                    units = layer_config.get("units")
+                    if units is not None:
+                        logging.info(
+                            f"Found last Dense layer with {units} units (fallback)"
+                        )
+                        return units
+
+            raise ValueError("No suitable Dense layer found for class count inference")
+
+        except Exception as e:
+            raise ConversionStepFailedError(
+                "model_json_parsing",
+                f"Failed to infer class count from model.json: {e}",
+            ) from e
+
+    def _infer_num_classes_from_metadata(self) -> int:
+        try:
+            logging.info("🔄 Inferring number of classes...")
+
+            if self._labels:
+                num_classes = len(self._labels)
+                logging.info(f"✅ Using class count from metadata: {num_classes}")
+                return num_classes
+
+            try:
+                model = tf.keras.models.load_model(str(self.keras_output_path))
+                output_shape = model.output_shape
+                logging.info(f"Model output shape: {output_shape}")
+
+                if len(output_shape) >= 2 and output_shape[-1] is not None:
+                    num_classes = output_shape[-1]
+                    logging.info(
+                        f"✅ Inferred {num_classes} classes from model output shape"
+                    )
+                    return num_classes
+                else:
+                    raise ValueError(
+                        f"Cannot determine class count from output shape: {output_shape}"
+                    )
+
+            except Exception as model_error:
+                logging.warning(
+                    f"⚠️  Could not load model for class inference: {model_error}"
+                )
+                raise ValueError(
+                    "Cannot determine number of classes from either metadata or model"
+                )
+
+        except Exception as e:
+            raise ConversionStepFailedError(
+                "class_count_inference", f"Failed to infer number of classes: {e}"
+            ) from e
+
+    def _generate_default_labels(self, num_classes: int) -> List[str]:
+        return [f"class_{i}" for i in range(num_classes)]
+
+    def _is_audio_file(self, file_path: Path) -> bool:
+        try:
+            mime_type, _ = mimetypes.guess_type(str(file_path))
+            if mime_type and mime_type.startswith("audio/"):
+                return True
+
+            audio_extensions = {
+                ".wav",
+                ".wave",
+                ".WAV",
+                ".WAVE",
+                ".mp3",
+                ".MP3",
+                ".flac",
+                ".FLAC",
+                ".ogg",
+                ".OGG",
+                ".m4a",
+                ".M4A",
+            }
+            if file_path.suffix.lower() in {ext.lower() for ext in audio_extensions}:
+                return True
+
+            return False
+
+        except Exception as e:
+            logging.debug(f"Error checking file type for {file_path}: {e}")
+            return file_path.suffix.lower() in {".wav", ".wave"}
+
+    def _collect_audio_files(self, directory: Path) -> List[Path]:
+        audio_files = []
+
+        try:
+            for file_path in directory.iterdir():
+                if file_path.is_file() and self._is_audio_file(file_path):
+                    audio_files.append(file_path)
+
+            logging.debug(f"Found {len(audio_files)} audio files in {directory}")
+            return sorted(audio_files)
+
+        except Exception as e:
+            raise ConversionStepFailedError(
+                "audio_file_collection",
+                f"Failed to collect audio files from {directory}: {e}",
+            ) from e
+
+    def _validate_and_sample_audio_files(self) -> List[Path]:
+        try:
+            wav_dir = Path(self.wav_input_dir)
+
+            audio_files = self._collect_audio_files(wav_dir)
+
+            logging.info(f"Found {len(audio_files)} audio files in {wav_dir}")
+
+            if len(audio_files) < REQUIRED_SAMPLES:
+                raise ConversionStepFailedError(
+                    "dataset_validation",
+                    f"Insufficient audio files: found {len(audio_files)}, "
+                    f"required at least {REQUIRED_SAMPLES}",
+                )
+
+            if len(audio_files) > REQUIRED_SAMPLES:
+                selected_files = random.sample(audio_files, REQUIRED_SAMPLES)
+                logging.info(
+                    f"Randomly sampled {REQUIRED_SAMPLES} files from {len(audio_files)} available"
                 )
             else:
-                state_order = [
-                    ConversionState.INITIALIZED,
-                    ConversionState.TFJS_CONVERTED,
-                    ConversionState.METADATA_LOADED,
-                    ConversionState.MODELS_CREATED,
-                    ConversionState.WEIGHTS_TRANSFERRED,
-                    ConversionState.QUANTIZED,
-                    ConversionState.COMPLETED,
-                ]
+                selected_files = audio_files
+                logging.info(f"Using all {len(selected_files)} available files")
 
-                try:
-                    current_idx = state_order.index(self._conversion_state)
-                    if current_idx < len(state_order) - 1:
-                        next_state = state_order[current_idx + 1]
-                        error_msg += f"\nNext expected operation corresponds to state: '{next_state.value}'"
-                except ValueError:
-                    pass
+            return selected_files
 
-            raise RuntimeError(error_msg)
-
-    def _set_state(self, new_state: ConversionState) -> None:
-        logging.info(
-            f"🔄 State transition: {self._conversion_state.value} → {new_state.value}"
-        )
-        self._conversion_state = new_state
+        except ConversionStepFailedError:
+            raise
+        except Exception as e:
+            raise ConversionStepFailedError(
+                "dataset_validation", f"Failed to validate and sample audio files: {e}"
+            ) from e
 
     def _generate_features_from_wavs(self) -> Iterator[np.ndarray]:
         logging.info(
-            "--- Starting feature generation from WAV files for quantization ---"
+            "--- Starting feature generation from audio files for quantization ---"
         )
 
-        if not os.path.exists(self.wav_input_dir):
-            raise FileNotFoundError(
-                f"WAV input directory not found: '{self.wav_input_dir}'"
-            )
-
-        wav_files = glob.glob(os.path.join(self.wav_input_dir, "*.wav"))
-        wav_files += glob.glob(os.path.join(self.wav_input_dir, "*.WAV"))
-
-        if not wav_files:
-            raise FileNotFoundError(f"No .wav files found in '{self.wav_input_dir}'")
+        audio_files = self._validate_and_sample_audio_files()
 
         logging.info(
-            f"Found {len(wav_files)} WAV files. Processing them to generate representative data..."
+            f"Processing {len(audio_files)} audio files to generate representative data..."
         )
 
-        interpreter = Interpreter(model_path=self.preprocessing_model_path)
-        interpreter.allocate_tensors()
-        input_details = interpreter.get_input_details()[0]
-        output_details = interpreter.get_output_details()[0]
+        try:
+            interpreter = Interpreter(model_path=str(self.preprocessing_model_path))
+            interpreter.allocate_tensors()
+            input_details = interpreter.get_input_details()[0]
+            output_details = interpreter.get_output_details()[0]
 
-        target_len = input_details["shape"][1]
-        target_sr = 44100
+            target_len = input_details["shape"][1]
+            target_sr = 44100
 
-        for wav_path in wav_files:
-            try:
-                sampling_rate, data = wavfile.read(wav_path)
-                data = data.astype(np.float32) / 32768.0
-                if len(data.shape) > 1:
-                    data = np.mean(data, axis=1)
-                if sampling_rate != target_sr:
-                    data = resample(data, int(len(data) * (target_sr / sampling_rate)))
-                if len(data) > target_len:
-                    data = data[
-                        (len(data) - target_len) // 2 : (len(data) + target_len) // 2
-                    ]
-                else:
-                    data = np.pad(data, (0, target_len - len(data)), "constant")
+            for audio_path in audio_files:
+                try:
+                    sampling_rate, data = wavfile.read(str(audio_path))
+                    data = data.astype(np.float32) / 32768.0
+                    if len(data.shape) > 1:
+                        data = np.mean(data, axis=1)
+                    if sampling_rate != target_sr:
+                        data = resample(
+                            data, int(len(data) * (target_sr / sampling_rate))
+                        )
+                    if len(data) > target_len:
+                        data = data[
+                            (len(data) - target_len) // 2 : (len(data) + target_len)
+                            // 2
+                        ]
+                    else:
+                        data = np.pad(data, (0, target_len - len(data)), "constant")
 
-                model_input_audio = data.reshape(input_details["shape"])
+                    model_input_audio = data.reshape(input_details["shape"])
 
-                interpreter.set_tensor(input_details["index"], model_input_audio)
-                interpreter.invoke()
-                feature_map = interpreter.get_tensor(output_details["index"])
+                    interpreter.set_tensor(input_details["index"], model_input_audio)
+                    interpreter.invoke()
+                    feature_map = interpreter.get_tensor(output_details["index"])
 
-                yield [feature_map.astype(np.float32)]
+                    yield [feature_map.astype(np.float32)]
 
-            except Exception as e:
-                logging.warning(
-                    f"Could not process WAV file '{os.path.basename(wav_path)}': {e}. Skipping."
-                )
-                continue
+                except Exception as e:
+                    logging.warning(
+                        f"Could not process audio file '{audio_path.name}': {e}. Skipping."
+                    )
+                    continue
+
+        except Exception as e:
+            raise ConversionStepFailedError(
+                "feature_generation",
+                f"Failed to initialize preprocessing model or generate features: {e}",
+            ) from e
 
     def _representative_data_gen(self):
         try:
@@ -238,183 +411,120 @@ class ModelConverter:
             )
 
     def convert_tfjs_to_keras(self) -> None:
-        self._validate_state(ConversionState.INITIALIZED)
-
         logging.info(
             f"--- Step 1: Converting {self.tfjs_model_path} to {self.keras_output_path} ---"
         )
 
-        # Validate input file exists and is readable
-        if not os.path.exists(self.tfjs_model_path):
-            self._set_state(ConversionState.FAILED)
-            raise FileNotFoundError(
-                f"TF.js model file not found: '{self.tfjs_model_path}'\n"
-                f"Please ensure the file exists and the path is correct."
-            )
-
-        if not os.access(self.tfjs_model_path, os.R_OK):
-            self._set_state(ConversionState.FAILED)
-            raise PermissionError(
-                f"TF.js model file is not readable: '{self.tfjs_model_path}'\n"
-                f"Please check file permissions."
-            )
-
-        # Ensure output directory exists and is writable
-        output_dir = os.path.dirname(self.keras_output_path)
-        if output_dir:
-            try:
-                os.makedirs(output_dir, exist_ok=True)
-            except PermissionError:
-                self._set_state(ConversionState.FAILED)
-                raise PermissionError(
-                    f"Cannot create output directory: '{output_dir}'\n"
-                    f"Please check directory permissions."
-                )
-
         try:
             logging.info("🔄 Converting TF.js model using tensorflowjs converter...")
 
+            self.keras_output_path.parent.mkdir(parents=True, exist_ok=True)
+
             dispatch_tensorflowjs_to_keras_h5_conversion(
-                self.tfjs_model_path,
-                self.keras_output_path,
+                str(self.tfjs_model_path),
+                str(self.keras_output_path),
             )
 
             logging.info("TensorFlow.js to Keras conversion completed successfully")
 
-            # Verify the output file was created successfully
-            if not os.path.exists(self.keras_output_path):
-                self._set_state(ConversionState.FAILED)
-                raise RuntimeError(
-                    f"Keras model file was not created: '{self.keras_output_path}'\n"
-                    f"The conversion process completed but no output file was generated."
-                )
+            if (
+                not self.keras_output_path.exists()
+                or self.keras_output_path.stat().st_size == 0
+            ):
+                raise RuntimeError("Keras model file was not created or is empty")
 
-            # Verify the output file is not empty
-            if os.path.getsize(self.keras_output_path) == 0:
-                self._set_state(ConversionState.FAILED)
-                raise RuntimeError(
-                    f"Keras model file is empty: '{self.keras_output_path}'\n"
-                    f"The conversion process may have failed silently."
-                )
-
-            self._set_state(ConversionState.TFJS_CONVERTED)
-            file_size = os.path.getsize(self.keras_output_path)
+            file_size = self.keras_output_path.stat().st_size
             logging.info(
                 f"✅ TF.js to Keras conversion successful! Output size: {file_size:,} bytes"
             )
 
         except Exception as e:
-            self._set_state(ConversionState.FAILED)
-            # Check if it's a TensorFlow.js specific error based on the error message
-            error_msg = str(e).lower()
-            if any(
-                keyword in error_msg
-                for keyword in ["tensorflowjs", "tfjs", "model.json", "invalid model"]
-            ):
-                raise RuntimeError(
-                    f"TensorFlow.js conversion failed: {str(e)}\n"
-                    f"Please ensure the input file is a valid TF.js model."
-                ) from e
-            else:
-                raise RuntimeError(
-                    f"Unexpected error during TF.js to Keras conversion: {str(e)}\n"
-                    f"Please check the input file format and try again."
-                ) from e
+            raise ConversionStepFailedError(
+                "tfjs_to_keras_conversion",
+                f"Failed to convert TF.js model to Keras: {e}",
+            ) from e
 
     def load_metadata(self) -> None:
-        self._validate_state(ConversionState.TFJS_CONVERTED)
+        logging.info(
+            f"--- Step 2: Loading metadata from {self.metadata_path} (optional) ---"
+        )
 
-        logging.info(f"--- Step 2: Loading metadata from {self.metadata_path} ---")
-
-        if not os.path.exists(self.metadata_path):
-            self._set_state(ConversionState.FAILED)
-            raise FileNotFoundError(
-                f"Metadata file not found: '{self.metadata_path}'\n"
-                f"This file is required and must contain class labels in 'wordLabels' key."
+        if not self.metadata_path.exists():
+            logging.info(
+                f"ℹ️  Metadata file not found: {self.metadata_path}. Will use default labels."
             )
-
-        if not os.access(self.metadata_path, os.R_OK):
-            self._set_state(ConversionState.FAILED)
-            raise PermissionError(
-                f"Metadata file is not readable: '{self.metadata_path}'\n"
-                f"Please check file permissions."
-            )
+            self._labels = []
+            return
 
         try:
-            logging.info(f"🔄 Reading metadata from {self.metadata_path}...")
+            logging.info(f"🔄 Attempting to read metadata from {self.metadata_path}...")
+
             with open(self.metadata_path, "r", encoding="utf-8") as f:
                 metadata = json.load(f)
 
             if not isinstance(metadata, dict):
                 raise ValueError(
-                    f"Metadata file must contain a JSON object, got {type(metadata)}"
+                    f"Metadata must be a JSON object, got {type(metadata)}"
                 )
 
             if "wordLabels" not in metadata:
-                available_keys = list(metadata.keys())
-                raise ValueError(
-                    f"No 'wordLabels' key found in metadata file.\n"
-                    f"Available keys: {available_keys}\n"
-                    f"Please ensure the metadata file contains a 'wordLabels' array."
-                )
+                raise ValueError("No 'wordLabels' key found in metadata")
 
             word_labels = metadata["wordLabels"]
-            if not isinstance(word_labels, list):
-                raise ValueError(
-                    f"'wordLabels' must be a list, got {type(word_labels)}\n"
-                    f"Please ensure 'wordLabels' is an array of strings."
-                )
+            if not isinstance(word_labels, list) or not word_labels:
+                raise ValueError("'wordLabels' must be a non-empty list")
 
-            if not word_labels:
-                raise ValueError(
-                    "'wordLabels' list cannot be empty.\n"
-                    "Please provide at least one class label."
-                )
             for i, label in enumerate(word_labels):
-                if not isinstance(label, str):
-                    raise ValueError(
-                        f"All labels must be strings. Label at index {i} is {type(label)}: {label}"
-                    )
-                if not label.strip():
-                    raise ValueError(
-                        f"Label at index {i} is empty or contains only whitespace"
-                    )
+                if not isinstance(label, str) or not label.strip():
+                    raise ValueError(f"Invalid label at index {i}: {label}")
 
             self._labels = [label.strip() for label in word_labels]
-            self._set_state(ConversionState.METADATA_LOADED)
-            logging.info(f"✅ Loaded {len(self._labels)} labels: {self._labels}")
+            logging.info(
+                f"✅ Loaded {len(self._labels)} labels from metadata: {self._labels}"
+            )
 
-        except json.JSONDecodeError as e:
-            self._set_state(ConversionState.FAILED)
-            raise ValueError(
-                f"Invalid JSON format in metadata file: {str(e)}\n"
-                f"Please ensure the file contains valid JSON."
-            ) from e
-        except (ValueError, TypeError) as e:
-            self._set_state(ConversionState.FAILED)
-            raise ValueError(f"Metadata validation failed: {str(e)}") from e
         except Exception as e:
-            self._set_state(ConversionState.FAILED)
-            raise RuntimeError(
-                f"Unexpected error while processing metadata: {str(e)}\n"
-                f"Please check the file format and try again."
-            ) from e
+            logging.info(
+                f"ℹ️  Could not load metadata from {self.metadata_path}: {e}. "
+                f"Will use default labels based on model.json."
+            )
+            self._labels = []
 
     def create_models(self) -> None:
-        self._validate_state(ConversionState.METADATA_LOADED)
+        self._check_keras_model_exists()
 
         logging.info("--- Step 3: Creating model architectures ---")
 
-        # Validate that labels are loaded
-        if not self._labels:
-            self._set_state(ConversionState.FAILED)
-            raise ValueError(
-                "No class labels loaded. Cannot determine output layer size.\n"
-                "Please ensure metadata loading completed successfully."
-            )
+        try:
+            self._num_classes = self._infer_num_classes_from_model_json()
+            logging.info(f"✅ Using class count from model.json: {self._num_classes}")
+        except ConversionStepFailedError as e:
+            logging.warning(f"⚠️  Failed to infer class count from model.json: {e}")
+            # Fallback to metadata if available
+            if self._labels:
+                self._num_classes = len(self._labels)
+                logging.info(f"✅ Using class count from metadata: {self._num_classes}")
+            else:
+                raise ConversionStepFailedError(
+                    "class_count_inference",
+                    "Cannot determine class count from either model.json or metadata",
+                )
 
-        num_classes = len(self._labels)
-        logging.info(f"🔄 Creating models for {num_classes} classes...")
+        default_labels = self._generate_default_labels(self._num_classes)
+
+        if self._labels and len(self._labels) == self._num_classes:
+            logging.info(f"✅ Using metadata labels: {self._labels}")
+        else:
+            if self._labels and len(self._labels) != self._num_classes:
+                logging.warning(
+                    f"⚠️  Metadata label count ({len(self._labels)}) doesn't match "
+                    f"inferred class count ({self._num_classes}). Using default labels."
+                )
+            self._labels = default_labels
+            logging.info(f"✅ Using default labels: {self._labels}")
+
+        logging.info(f"🔄 Creating models for {self._num_classes} classes...")
+        logging.info(f"Using labels: {self._labels}")
 
         try:
             logging.info("🔄 Building original model architecture...")
@@ -449,7 +559,7 @@ class ModelConverter:
                 x_dropout
             )
             outputs = tf.keras.layers.Dense(
-                num_classes, activation="softmax", name="NewHeadDense"
+                self._num_classes, activation="softmax", name="NewHeadDense"
             )(x_dense)
             self._original_model = tf.keras.Model(
                 inputs=inputs, outputs=outputs, name="original_model"
@@ -506,7 +616,7 @@ class ModelConverter:
             x_dropout = tf.keras.layers.Dropout(0.25, name="dropout_1")(x_flat1)
             x_reshaped = tf.keras.layers.Reshape((1, 1, 2000))(x_dropout)
             x_conv2 = tf.keras.layers.Conv2D(
-                num_classes,
+                self._num_classes,
                 kernel_size=(1, 1),
                 activation="softmax",
                 name="NewHeadDense_conv_replacement",
@@ -522,7 +632,7 @@ class ModelConverter:
             if self._final_model is None:
                 raise RuntimeError("Failed to create optimized model architecture")
 
-            expected_output_shape = (None, num_classes)
+            expected_output_shape = (None, self._num_classes)
             if self._original_model.output_shape != expected_output_shape:
                 raise RuntimeError(
                     f"Original model output shape mismatch. Expected {expected_output_shape}, "
@@ -534,7 +644,6 @@ class ModelConverter:
                     f"got {self._final_model.output_shape}"
                 )
 
-            self._set_state(ConversionState.MODELS_CREATED)
             logging.info(
                 f"✅ Original model created with {self._original_model.count_params():,} parameters"
             )
@@ -543,48 +652,20 @@ class ModelConverter:
             )
             logging.info("✅ Model architectures created successfully!")
 
-        except tf.errors.InvalidArgumentError as e:
-            self._set_state(ConversionState.FAILED)
-            raise RuntimeError(
-                f"TensorFlow model creation failed due to invalid arguments: {str(e)}\n"
-                f"This may indicate incompatible layer configurations."
-            ) from e
         except Exception as e:
-            self._set_state(ConversionState.FAILED)
-            raise RuntimeError(
-                f"Unexpected error during model creation: {str(e)}\n"
-                f"Please check the model architecture configuration."
+            raise ConversionStepFailedError(
+                "model_creation", f"Failed to create model architectures: {e}"
             ) from e
 
     def transfer_weights(self) -> None:
-        self._validate_state(ConversionState.MODELS_CREATED)
+        self._check_models_created()
 
         logging.info("--- Step 4: Loading and transferring weights ---")
 
-        if not os.path.exists(self.keras_output_path):
-            self._set_state(ConversionState.FAILED)
-            raise FileNotFoundError(
-                f"Keras model file not found: '{self.keras_output_path}'\n"
-                f"Please ensure the TF.js to Keras conversion completed successfully."
-            )
-
-        if not os.access(self.keras_output_path, os.R_OK):
-            self._set_state(ConversionState.FAILED)
-            raise PermissionError(
-                f"Keras model file is not readable: '{self.keras_output_path}'\n"
-                f"Please check file permissions."
-            )
-
-        if os.path.getsize(self.keras_output_path) == 0:
-            self._set_state(ConversionState.FAILED)
-            raise RuntimeError(
-                f"Keras model file is empty: '{self.keras_output_path}'\n"
-                f"The file may be corrupted or the conversion may have failed."
-            )
-
         try:
             logging.info(f"🔄 Loading weights from {self.keras_output_path}...")
-            self._original_model.load_weights(self.keras_output_path)
+            self._original_model.load_weights(str(self.keras_output_path))
+
             for layer_new in self._final_model.layers:
                 if not layer_new.get_weights():
                     continue
@@ -593,8 +674,10 @@ class ModelConverter:
                     layer_new.set_weights(source_layer.get_weights())
                 except ValueError:
                     pass
+
             logging.info("✅ Weights loaded successfully")
             logging.info("🔄 Transferring weights to optimized model...")
+
             dense1_orig = self._original_model.get_layer("dense_1")
             conv1_new = self._final_model.get_layer("dense_1_conv_replacement")
             weights, biases = dense1_orig.get_weights()
@@ -604,6 +687,7 @@ class ModelConverter:
             logging.info(
                 "  - Manually transferred: dense_1 -> dense_1_conv_replacement"
             )
+
             dense2_orig = self._original_model.get_layer("NewHeadDense")
             conv2_new = self._final_model.get_layer("NewHeadDense_conv_replacement")
             weights, biases = dense2_orig.get_weights()
@@ -614,24 +698,15 @@ class ModelConverter:
                 "  - Manually transferred: NewHeadDense -> NewHeadDense_conv_replacement"
             )
 
-            self._set_state(ConversionState.WEIGHTS_TRANSFERRED)
             logging.info("✅ Weight transfer completed!")
 
-        except tf.errors.InvalidArgumentError as e:
-            self._set_state(ConversionState.FAILED)
-            raise RuntimeError(
-                f"TensorFlow weight loading failed: {str(e)}\n"
-                f"The Keras model file may be corrupted or incompatible."
-            ) from e
         except Exception as e:
-            self._set_state(ConversionState.FAILED)
-            raise RuntimeError(
-                f"Unexpected error during weight transfer: {str(e)}\n"
-                f"Please check the model files and try again."
+            raise ConversionStepFailedError(
+                "weight_transfer", f"Failed to transfer weights: {e}"
             ) from e
 
     def quantize_and_convert(self) -> None:
-        self._validate_state(ConversionState.WEIGHTS_TRANSFERRED)
+        self._check_models_created()
 
         logging.info("--- Step 5: Quantizing and converting to TFLite ---")
 
@@ -653,7 +728,7 @@ class ModelConverter:
 
             self._tflite_model = converter.convert()
 
-            os.makedirs(os.path.dirname(self.tflite_output_path), exist_ok=True)
+            self.tflite_output_path.parent.mkdir(parents=True, exist_ok=True)
 
             with open(self.tflite_output_path, "wb") as f:
                 f.write(self._tflite_model)
@@ -676,36 +751,36 @@ class ModelConverter:
                 "output_scale": float(output_details["quantization"][0]),
                 "output_zero_point": int(output_details["quantization"][1]),
                 "model_size": len(self._tflite_model),
-                "num_classes": len(self._labels),
+                "num_classes": self._num_classes,
                 "class_labels": self._labels,
             }
 
-            self._set_state(ConversionState.QUANTIZED)
             logging.info(
                 f"✅ Model info extracted: {self._model_info['input_shape']} -> {self._model_info['output_shape']}"
             )
 
         except Exception as e:
-            self._set_state(ConversionState.FAILED)
-            raise RuntimeError(f"Quantization and conversion failed: {str(e)}") from e
+            raise ConversionStepFailedError(
+                "quantization_and_conversion",
+                f"Failed to quantize and convert model: {e}",
+            ) from e
 
     def get_model_info(self) -> Dict[str, Any]:
-        if self._conversion_state != ConversionState.QUANTIZED:
+        if not self._model_info:
             raise RuntimeError(
                 "Model conversion must be completed before accessing model info"
             )
         return self._model_info.copy()
 
     def get_labels(self) -> List[str]:
-        if self._conversion_state.value in [
-            ConversionState.INITIALIZED.value,
-            ConversionState.FAILED.value,
-        ]:
-            raise RuntimeError("Metadata must be loaded before accessing labels")
+        if not self._labels:
+            raise RuntimeError(
+                "Labels not available. Run load_metadata() or create_models() first."
+            )
         return self._labels.copy()
 
     def get_tflite_model(self) -> bytes:
-        if self._conversion_state != ConversionState.QUANTIZED:
+        if self._tflite_model is None:
             raise RuntimeError(
                 "Model conversion must be completed before accessing TFLite model"
             )
@@ -717,12 +792,14 @@ class ModelConverter:
 
         try:
             self.convert_tfjs_to_keras()
-            self.load_metadata()
-            self.create_models()
-            self.transfer_weights()
-            self.quantize_and_convert()
 
-            self._set_state(ConversionState.COMPLETED)
+            self.load_metadata()
+
+            self.create_models()
+
+            self.transfer_weights()
+
+            self.quantize_and_convert()
 
             logging.info("\n" + "=" * 65)
             logging.info("🎉 Conversion completed successfully!")
@@ -735,46 +812,12 @@ class ModelConverter:
             logging.info(f"   - Labels: {', '.join(self._labels)}")
             logging.info("\n✨ TFLite model ready for deployment!")
 
-        except Exception as e:
-            self._set_state(ConversionState.FAILED)
-            logging.info(f"\n❌ Conversion failed: {str(e)}")
+        except ConversionStepFailedError:
             raise
-
-
-def _validate_path_exists(path: str, path_type: str) -> None:
-    path_obj = Path(path)
-
-    if not path_obj.exists():
-        raise FileNotFoundError(
-            f"{path_type} not found: '{path}'\n"
-            f"Please ensure the path exists and is accessible."
-        )
-
-    if not os.access(path, os.R_OK):
-        raise PermissionError(
-            f"{path_type} is not readable: '{path}'\nPlease check file permissions."
-        )
-
-
-def _validate_output_path(path: str, path_type: str) -> None:
-    path_obj = Path(path)
-    output_dir = path_obj.parent
-
-    # Create directory if it doesn't exist
-    try:
-        output_dir.mkdir(parents=True, exist_ok=True)
-    except PermissionError:
-        raise PermissionError(
-            f"Cannot create output directory for {path_type}: '{output_dir}'\n"
-            f"Please check directory permissions."
-        )
-
-    # Check if directory is writable
-    if not os.access(output_dir, os.W_OK):
-        raise PermissionError(
-            f"Output directory for {path_type} is not writable: '{output_dir}'\n"
-            f"Please check directory permissions."
-        )
+        except Exception as e:
+            raise ConversionStepFailedError(
+                "pipeline_execution", f"Unexpected error in conversion pipeline: {e}"
+            ) from e
 
 
 def main():
@@ -782,26 +825,18 @@ def main():
         description="Optimized Model Converter for AcousticsLab. Converts TF.js models to TFLite."
     )
 
-    parser.add_argument(
-        "--files",
-        nargs="+",
-        metavar="FILE",
-        help="Simplified usage: specify TF.js model and metadata files in order. "
-        "Example: --files model.json metadata.json",
-    )
+    # Positional arguments
+    parser.add_argument("--tfjs_model", help="Path to the input TF.js model.json file")
 
-    parser.add_argument(
-        "--tfjs_model",
-        type=str,
-        default=str(DEFAULT_TFJS_MODEL_PATH),
-        help=f"Path to the input TF.js model.json file. Default: {DEFAULT_TFJS_MODEL_PATH}",
-    )
+    # Optional arguments with defaults
     parser.add_argument(
         "--metadata",
         type=str,
         default=str(DEFAULT_METADATA_PATH),
-        help=f"Path to the input metadata.json file. Default: {DEFAULT_METADATA_PATH}",
+        help=f"Path to the input metadata.json file (optional). Default: {DEFAULT_METADATA_PATH}",
     )
+
+    # Optional arguments with defaults
     parser.add_argument(
         "--keras_output",
         type=str,
@@ -829,49 +864,14 @@ def main():
 
     args = parser.parse_args()
 
-    if args.files:
-        if len(args.files) < 2:
-            parser.error(
-                "--files requires at least 2 arguments: TF.js model and metadata file"
-            )
-        elif len(args.files) > 2:
-            parser.error(
-                "--files accepts exactly 2 arguments: TF.js model and metadata file"
-            )
-
-        args.tfjs_model = args.files[0]
-        args.metadata = args.files[1]
-        tfjs_path = Path(args.tfjs_model)
-        base_name = tfjs_path.stem
-        output_dir = tfjs_path.parent
-
-        args.keras_output = str(output_dir / f"{base_name}_converted.h5")
-        args.tflite_output = str(output_dir / f"{base_name}_quantized.tflite")
-
-    try:
-        _validate_path_exists(args.tfjs_model, "TF.js model file")
-        _validate_path_exists(args.metadata, "Metadata file")
-        _validate_path_exists(args.wav_dir, "WAV input directory")
-        _validate_path_exists(args.preprocessing_model, "Preprocessing model file")
-        _validate_output_path(args.keras_output, "Keras output file")
-        _validate_output_path(args.tflite_output, "TFLite output file")
-
-        logging.info("✅ All input paths validated successfully")
-        logging.info("📁 Input files:")
-        logging.info(f"   - TF.js model: {args.tfjs_model}")
-        logging.info(f"   - Metadata: {args.metadata}")
-        logging.info(f"   - WAV directory: {args.wav_dir}")
-        logging.info(f"   - Preprocessing model: {args.preprocessing_model}")
-        logging.info("📁 Output files:")
-        logging.info(f"   - Keras model: {args.keras_output}")
-        logging.info(f"   - TFLite model: {args.tflite_output}")
-
-    except (FileNotFoundError, PermissionError) as e:
-        logging.error(f"❌ Path validation failed: {e}")
-        sys.exit(1)
-    except Exception as e:
-        logging.error(f"❌ Unexpected error during path validation: {e}")
-        sys.exit(1)
+    logging.info("📁 Input configuration:")
+    logging.info(f"   - TF.js model: {args.tfjs_model}")
+    logging.info(f"   - Metadata: {args.metadata} (optional)")
+    logging.info(f"   - Audio directory: {args.wav_dir}")
+    logging.info(f"   - Preprocessing model: {args.preprocessing_model}")
+    logging.info("📁 Output configuration:")
+    logging.info(f"   - Keras model: {args.keras_output}")
+    logging.info(f"   - TFLite model: {args.tflite_output}")
 
     try:
         converter = ModelConverter(
@@ -883,11 +883,19 @@ def main():
             preprocessing_model_path=args.preprocessing_model,
         )
         converter.run()
+
+    except ConversionStepFailedError as e:
+        logging.error(f"❌ Conversion failed at step '{e.step_name}': {e}")
+        if e.original_exception:
+            logging.debug(f"Original exception: {e.original_exception}")
+        sys.exit(1)
+
     except KeyboardInterrupt:
         logging.info("\n⚠️  Conversion interrupted by user")
-        sys.exit(130)  # Standard exit code for SIGINT
+        sys.exit(130)
+
     except Exception as e:
-        logging.critical(f"❌ An unrecoverable error occurred during conversion: {e}")
+        logging.critical(f"❌ An unexpected error occurred during conversion: {e}")
         sys.exit(1)
 
 
