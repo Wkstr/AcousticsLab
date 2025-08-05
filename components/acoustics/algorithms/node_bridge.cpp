@@ -6,8 +6,6 @@ namespace bridge {
 
 void __REGISTER_INTERNAL_MODULE_NODE_BUILDER__()
 {
-    static const char *TAG = "NodeBridge";
-
     LOG(INFO, "Registering internal module node builders");
 
     // Register SpeechCommandsNode

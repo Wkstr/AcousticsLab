@@ -6,8 +6,6 @@ namespace bridge {
 
 void __REGISTER_MODULE_DAG_BUILDER__()
 {
-    static const char *TAG = "DAGBridge";
-
     LOG(INFO, "Registering module DAG builders");
 
     // Register SoundClassificationDAG

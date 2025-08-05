@@ -8,8 +8,6 @@
 
 namespace algorithms { namespace node {
 
-    static const char *TAG = "SpeechCommandsNode";
-
     SpeechCommandsNode::SpeechCommandsNode(const core::ConfigMap &configs, module::MIOS inputs, module::MIOS outputs,
         int priority)
         : module::MNode("SpeechCommandsNode", std::move(inputs), std::move(outputs), priority), _engine(nullptr),
@@ -41,17 +39,18 @@ namespace algorithms { namespace node {
             }
         }
 
-        LOG(INFO, "InferenceNode configured: engine_id=%d, model_id=%d, graph_id=%d", _engine_id, _model_id, _graph_id);
+        LOG(INFO, "SpeechCommandsNode configured: engine_id=%d, model_id=%d, graph_id=%d", _engine_id, _model_id,
+            _graph_id);
     }
 
     SpeechCommandsNode::~SpeechCommandsNode()
     {
-        LOG(DEBUG, "Destroying InferenceNode");
+        LOG(DEBUG, "Destroying SpeechCommandsNode");
     }
 
     core::Status SpeechCommandsNode::config(const core::ConfigMap &configs) noexcept
     {
-        LOG(DEBUG, "Reconfiguring InferenceNode");
+        LOG(DEBUG, "Reconfiguring SpeechCommandsNode");
 
         bool config_changed = false;
 
@@ -98,7 +97,7 @@ namespace algorithms { namespace node {
             _model.reset();
             _graph.reset();
 
-            LOG(INFO, "InferenceNode reconfigured: engine_id=%d, model_id=%d, graph_id=%d", _engine_id, _model_id,
+            LOG(INFO, "SpeechCommandsNode reconfigured: engine_id=%d, model_id=%d, graph_id=%d", _engine_id, _model_id,
                 _graph_id);
         }
 
