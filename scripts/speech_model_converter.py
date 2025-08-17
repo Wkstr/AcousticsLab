@@ -43,12 +43,13 @@ import sys
 import json
 import random
 import mimetypes
+import urllib.request
+import tarfile
+import os
+import librosa
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Iterator
 
-from scipy.io import wavfile
-from scipy.signal import resample
-from tensorflow.lite.python.interpreter import Interpreter
 from tensorflowjs.converters.converter import (
     dispatch_tensorflowjs_to_keras_h5_conversion,
 )
@@ -69,9 +70,41 @@ DEFAULT_TFLITE_OUTPUT_PATH = (
     _PROJECT_ROOT / "tm-my-audio-model" / "quantized_model.tflite"
 )
 DEFAULT_WAV_INPUT_DIR = _PROJECT_ROOT / "datasound"
-DEFAULT_PREPROCESSING_MODEL_PATH = _PROJECT_ROOT / "models" / "preprocessing.tflite"
 
 REQUIRED_SAMPLES = 100
+
+
+def download_and_extract_preproc_model(dest_dir: Path) -> Path:
+    PREPROC_MODEL_URL = "https://storage.googleapis.com/tfjs-models/tfjs/speech-commands/conversion/sc_preproc_model.tar.gz"
+    MODEL_DIR_NAME = "sc_preproc_model"
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    model_path = dest_dir / MODEL_DIR_NAME
+
+    if model_path.exists():
+        logging.info(f"✅ Preprocessing model found at {model_path}")
+        return model_path
+
+    logging.info(
+        f"Preprocessing model not found. Downloading from {PREPROC_MODEL_URL}..."
+    )
+
+    tar_path, _ = urllib.request.urlretrieve(PREPROC_MODEL_URL)
+    logging.info(f"Downloaded to temporary file: {tar_path}")
+
+    logging.info(f"Extracting to {dest_dir}...")
+    with tarfile.open(tar_path, "r:gz") as tar:
+        tar.extractall(path=dest_dir)
+
+    os.remove(tar_path)
+
+    if not model_path.exists():
+        raise RuntimeError(f"Failed to extract model to {model_path}")
+
+    logging.info(
+        f"✅ Successfully downloaded and extracted preprocessing model to {model_path}"
+    )
+    return model_path
 
 
 class ConversionStepFailedError(Exception):
@@ -91,7 +124,6 @@ class ModelConverter:
         keras_output_path: str = str(DEFAULT_KERAS_OUTPUT_PATH),
         tflite_output_path: str = str(DEFAULT_TFLITE_OUTPUT_PATH),
         wav_input_dir: str = str(DEFAULT_WAV_INPUT_DIR),
-        preprocessing_model_path: str = str(DEFAULT_PREPROCESSING_MODEL_PATH),
     ):
         path_configs = {
             "tfjs_model_path": tfjs_model_path,
@@ -99,13 +131,15 @@ class ModelConverter:
             "keras_output_path": keras_output_path,
             "tflite_output_path": tflite_output_path,
             "wav_input_dir": wav_input_dir,
-            "preprocessing_model_path": preprocessing_model_path,
         }
 
         for attr_name, path_value in path_configs.items():
             if not isinstance(path_value, str) or not path_value.strip():
                 raise ValueError(f"{attr_name} must be a non-empty string")
             setattr(self, attr_name, Path(path_value.strip()))
+
+        preproc_cache_dir = _PROJECT_ROOT / "tm-my-audio-model"
+        self.preproc_model_path = download_and_extract_preproc_model(preproc_cache_dir)
 
         self._model_info: Dict[str, Any] = {}
         self._labels: List[str] = []
@@ -356,24 +390,15 @@ class ModelConverter:
         )
 
         try:
-            interpreter = Interpreter(model_path=str(self.preprocessing_model_path))
-            interpreter.allocate_tensors()
-            input_details = interpreter.get_input_details()[0]
-            output_details = interpreter.get_output_details()[0]
-
-            target_len = input_details["shape"][1]
+            preproc_model = tf.saved_model.load(str(self.preproc_model_path))
+            inference_func = preproc_model.signatures["serving_default"]
+            input_details = inference_func.inputs[0]
+            target_len = input_details.shape[1]
             target_sr = 44100
 
             for audio_path in audio_files:
                 try:
-                    sampling_rate, data = wavfile.read(str(audio_path))
-                    data = data.astype(np.float32) / 32768.0
-                    if len(data.shape) > 1:
-                        data = np.mean(data, axis=1)
-                    if sampling_rate != target_sr:
-                        data = resample(
-                            data, int(len(data) * (target_sr / sampling_rate))
-                        )
+                    data, _ = librosa.load(str(audio_path), sr=target_sr, mono=True)
                     if len(data) > target_len:
                         data = data[
                             (len(data) - target_len) // 2 : (len(data) + target_len)
@@ -382,12 +407,11 @@ class ModelConverter:
                     else:
                         data = np.pad(data, (0, target_len - len(data)), "constant")
 
-                    model_input_audio = data.reshape(input_details["shape"])
-
-                    interpreter.set_tensor(input_details["index"], model_input_audio)
-                    interpreter.invoke()
-                    feature_map = interpreter.get_tensor(output_details["index"])
-
+                    model_input_audio = tf.constant(
+                        data.reshape(1, target_len), dtype=input_details.dtype
+                    )
+                    result_dict = inference_func(model_input_audio)
+                    feature_map = list(result_dict.values())[0].numpy()
                     yield [feature_map.astype(np.float32)]
 
                 except Exception as e:
@@ -825,10 +849,13 @@ def main():
         description="Optimized Model Converter for AcousticsLab. Converts TF.js models to TFLite."
     )
 
-    # Positional arguments
-    parser.add_argument("--tfjs_model", help="Path to the input TF.js model.json file")
+    parser.add_argument(
+        "--tfjs_model",
+        type=str,
+        default=str(DEFAULT_TFJS_MODEL_PATH),
+        help="Path to the input TF.js model.json file",
+    )
 
-    # Optional arguments with defaults
     parser.add_argument(
         "--metadata",
         type=str,
@@ -836,7 +863,6 @@ def main():
         help=f"Path to the input metadata.json file (optional). Default: {DEFAULT_METADATA_PATH}",
     )
 
-    # Optional arguments with defaults
     parser.add_argument(
         "--keras_output",
         type=str,
@@ -855,12 +881,6 @@ def main():
         default=str(DEFAULT_WAV_INPUT_DIR),
         help=f"Directory containing input .wav files for quantization calibration. Default: {DEFAULT_WAV_INPUT_DIR}",
     )
-    parser.add_argument(
-        "--preprocessing_model",
-        type=str,
-        default=str(DEFAULT_PREPROCESSING_MODEL_PATH),
-        help=f"Path to the TFLite model used for audio preprocessing (feature extraction). Default: {DEFAULT_PREPROCESSING_MODEL_PATH}",
-    )
 
     args = parser.parse_args()
 
@@ -868,7 +888,6 @@ def main():
     logging.info(f"   - TF.js model: {args.tfjs_model}")
     logging.info(f"   - Metadata: {args.metadata} (optional)")
     logging.info(f"   - Audio directory: {args.wav_dir}")
-    logging.info(f"   - Preprocessing model: {args.preprocessing_model}")
     logging.info("📁 Output configuration:")
     logging.info(f"   - Keras model: {args.keras_output}")
     logging.info(f"   - TFLite model: {args.tflite_output}")
@@ -880,7 +899,6 @@ def main():
             keras_output_path=args.keras_output,
             tflite_output_path=args.tflite_output,
             wav_input_dir=args.wav_dir,
-            preprocessing_model_path=args.preprocessing_model,
         )
         converter.run()
 
