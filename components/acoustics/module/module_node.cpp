@@ -1,5 +1,8 @@
 #include "module_node.hpp"
 
+#include "node/node_input.hpp"
+#include "node/node_output.hpp"
+
 namespace module {
 
 constexpr core::Status MNodeBuilderRegistry::registerNodeBuilder(std::string_view name, NodeBuilder builder,
@@ -31,3 +34,14 @@ constexpr core::Status MNodeBuilderRegistry::registerNodeBuilder(std::string_vie
 MNodeBuilderRegistry::NodeBuilderMap MNodeBuilderRegistry::_nodes = {};
 
 } // namespace module
+
+namespace bridge {
+
+void __REGISTER_PREDEFINED_MODULE_NODE_BUILDER__()
+{
+    module::MNodeBuilderRegistry::registerNodeBuilder(module::node::MNInput::node_name, &module::node::MNInput::create);
+    module::MNodeBuilderRegistry::registerNodeBuilder(module::node::MNOutput::node_name,
+        &module::node::MNOutput::create);
+}
+
+} // namespace bridge
