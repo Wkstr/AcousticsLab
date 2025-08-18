@@ -3,6 +3,7 @@
 #define TENSOR_HPP
 
 #include "logger.hpp"
+#include "types.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -22,16 +23,17 @@ class Tensor final
 public:
     enum class Type : uint16_t {
         Unknown = 0,
-        Int8 = (1 << 8) | 1,
-        Int16 = (2 << 8) | 2,
-        Int32 = (4 << 8) | 3,
-        Int64 = (8 << 8) | 4,
-        UInt8 = (1 << 8) | 5,
-        UInt16 = (2 << 8) | 6,
-        UInt32 = (4 << 8) | 7,
-        UInt64 = (8 << 8) | 8,
-        Float32 = (4 << 8) | 9,
-        Float64 = (8 << 8) | 10,
+        Int8 = (sizeof(int8_t) << 8) | 1,
+        Int16 = (sizeof(int16_t) << 8) | 2,
+        Int32 = (sizeof(int32_t) << 8) | 3,
+        Int64 = (sizeof(int64_t) << 8) | 4,
+        UInt8 = (sizeof(uint8_t) << 8) | 5,
+        UInt16 = (sizeof(uint16_t) << 8) | 6,
+        UInt32 = (sizeof(uint32_t) << 8) | 7,
+        UInt64 = (sizeof(uint64_t) << 8) | 8,
+        Float32 = (sizeof(float) << 8) | 9,
+        Float64 = (sizeof(double) << 8) | 10,
+        Class = (sizeof(class_t) << 8) | 11,
     };
 
     class Shape final
@@ -141,11 +143,6 @@ public:
             LOG(ERROR, "Tensor shape cannot be empty");
             return {};
         }
-        if (shape.dot() == 0) [[unlikely]]
-        {
-            LOG(ERROR, "Tensor shape cannot have zero elements");
-            return {};
-        }
 
         if (size && !data) [[unlikely]]
         {
@@ -238,16 +235,15 @@ public:
 
     bool reshape(const Shape &new_shape) noexcept
     {
-        if (new_shape.size() == 0 || new_shape.dot() == 0) [[unlikely]]
+        if (new_shape.size() == 0) [[unlikely]]
         {
-            LOG(ERROR, "Invalid shape for reshaping, size: %zu, dot: %zu", new_shape.size(), new_shape.dot());
+            LOG(ERROR, "Invalid shape for reshaping, size: %zu", new_shape.size());
             return false;
         }
-
-        if (new_shape.dot() != _shape.dot()) [[unlikely]]
+        if (_dsize * new_shape.dot() > _size) [[unlikely]]
         {
-            LOG(ERROR, "Reshape size mismatch: %zu elements expected, %zu elements available", new_shape.dot(),
-                _shape.dot());
+            LOG(ERROR, "New shape requires more data than available, required: %zu bytes, available: %zu bytes",
+                _dsize * new_shape.dot(), _size);
             return false;
         }
 

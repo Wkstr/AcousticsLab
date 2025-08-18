@@ -935,36 +935,29 @@ protected:
         while (value < value_end) [[likely]]
         {
             const char c = *value;
-            if (c == '"') [[unlikely]]
+            if (static_cast<unsigned char>(c) > 0x1F && c != '"' && c != '\\') [[likely]]
             {
-                const size_t size = static_cast<size_t>(value - value_pos);
-                if (size) [[likely]]
-                {
-                    write(static_cast<const void *>(value_pos), size);
-                }
-                value_pos = ++value;
+                ++value;
+                continue;
+            }
+
+            const size_t size = static_cast<size_t>(value - value_pos);
+            if (size) [[likely]]
+            {
+                write(static_cast<const void *>(value_pos), size);
+            }
+            value_pos = ++value;
+
+            if (c == '"')
+            {
                 write("\\\"");
-                continue;
             }
-            else if (c == '\\') [[unlikely]]
+            else if (c == '\\')
             {
-                const size_t size = static_cast<size_t>(value - value_pos);
-                if (size) [[likely]]
-                {
-                    write(static_cast<const void *>(value_pos), size);
-                }
-                value_pos = ++value;
                 write("\\\\");
-                continue;
             }
-            else if (std::iscntrl(static_cast<unsigned char>(c))) [[unlikely]]
+            else
             {
-                const size_t size = static_cast<size_t>(value - value_pos);
-                if (size) [[likely]]
-                {
-                    write(static_cast<const void *>(value_pos), size);
-                }
-                value_pos = ++value;
                 switch (c)
                 {
                     case '\t':
@@ -989,7 +982,6 @@ protected:
                         continue;
                 }
             }
-            ++value;
         }
         if (value_pos < value_end) [[likely]]
         {
