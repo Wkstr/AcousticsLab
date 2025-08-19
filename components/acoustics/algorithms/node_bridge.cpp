@@ -24,10 +24,12 @@ void __REGISTER_INTERNAL_MODULE_NODE_BUILDER__()
     // Log all registered nodes for debugging
     const auto &node_map = module::MNodeBuilderRegistry::getNodeBuilderMap();
     LOG(INFO, "Total registered internal nodes: %zu", node_map.size());
+#if LOG_LEVEL >= DEBUG
     for (const auto &[name, builder]: node_map)
     {
         LOG(DEBUG, "  - %s", name.data());
     }
+#endif
 }
 
 } // namespace bridge

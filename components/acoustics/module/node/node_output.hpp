@@ -32,13 +32,13 @@ public:
             return {};
         }
 
-        return std::make_shared<MNOutput>(*inputs, *outputs, priority);
+        return std::shared_ptr<MNOutput>(new MNOutput(*inputs, *outputs, priority));
     }
 
 private:
     template<typename IS, typename OS>
     constexpr explicit MNOutput(IS &&inputs, OS &&outputs, int priority) noexcept
-        : module::MNode(node_name, std::forward<IS>(inputs), std::forward<OS>(outputs), priority)
+        : module::MNode(std::string(node_name), std::forward<IS>(inputs), std::forward<OS>(outputs), priority)
     {
     }
 

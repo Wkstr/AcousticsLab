@@ -49,6 +49,8 @@ namespace porting { namespace algorithms { namespace node {
             return core::Tensor::Type::Float32;
         }
 
+        core::Status initialize() noexcept;
+
     protected:
         core::Status forward(const module::MIOS &inputs, module::MIOS &outputs) noexcept override;
 
@@ -61,10 +63,6 @@ namespace porting { namespace algorithms { namespace node {
         std::shared_ptr<float[]> _blackman_window;
 
         bool _initialized;
-
-        core::Status initialize() noexcept;
-
-        core::Status initBlackmanWindow() noexcept;
 
         void convertInt16ToFloat(const int16_t *input, float *output) noexcept;
 

@@ -1,9 +1,10 @@
 #include "sound_classification_dag.hpp"
-#include "../node/speech_commands_node.hpp"
 #include "core/logger.hpp"
 #include "hal/engine.hpp"
 #include "module/module_dag.hpp"
 #include "module/module_node.hpp"
+#include "module/node/node_input.hpp"
+#include "module/node/node_output.hpp"
 
 #include <algorithm>
 #include <esp_heap_caps.h>
@@ -22,29 +23,43 @@ namespace algorithms { namespace dag {
             return nullptr;
         }
 
-        auto dag = std::make_shared<SoundClassificationDAG>("SoundClassificationDAG");
+        auto sound_dag = std::make_shared<SoundClassificationDAG>("SoundClassificationDAG");
+        auto dag = sound_dag->getDAG();
+        const auto &input_tensor = createInputTensor();
+        const auto &feature_tensor = createFeatureTensor();
 
-        size_t output_size = getOutputSize(configs);
-        if (output_size == 0)
-        {
-            LOG(ERROR, "Failed to determine model output size - cannot create DAG");
-            return nullptr;
-        }
-        LOG(INFO, "DAG will be created with output size: %zu classes", output_size);
-
-        auto input_tensor = createInputTensor();
-        auto feature_tensor = createFeatureTensor();
-        auto output_tensor = createOutputTensor(output_size);
-
-        if (!input_tensor || !feature_tensor || !output_tensor)
+        if (!input_tensor || !feature_tensor)
         {
             LOG(ERROR, "Failed to create DAG tensors");
             return nullptr;
         }
 
-        auto input_mio = std::make_shared<module::MIO>(input_tensor);
-        auto feature_mio = std::make_shared<module::MIO>(feature_tensor);
-        auto output_mio = std::make_shared<module::MIO>(output_tensor);
+        auto input_mio = std::make_shared<module::MIO>(input_tensor, "audio_input");
+        auto feature_mio = std::make_shared<module::MIO>(feature_tensor, "feature_data");
+
+        const auto &output_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Class,
+            core::Tensor::Shape(1, 100));
+        if (!output_tensor)
+        {
+            LOG(ERROR, "Failed to create output tensor");
+            return nullptr;
+        }
+        auto output_mio = std::make_shared<module::MIO>(output_tensor, "classification_output");
+
+        module::MIOS input_ios = { input_mio };
+        const auto &node_builders = module::MNodeBuilderRegistry::getNodeBuilderMap();
+        auto input_builder_it = node_builders.find("input");
+        if (input_builder_it == node_builders.end())
+        {
+            LOG(ERROR, "MNInput builder not found in registry");
+            return nullptr;
+        }
+        auto input_node = input_builder_it->second(configs, &input_ios, &input_ios, 0);
+        if (!input_node)
+        {
+            LOG(ERROR, "Failed to create MNInput node");
+            return nullptr;
+        }
 
         auto feature_node = createFeatureExtractorNode(configs, input_mio, feature_mio);
         if (!feature_node)
@@ -60,22 +75,40 @@ namespace algorithms { namespace dag {
             return nullptr;
         }
 
+        module::MIOS output_ios = { output_mio };
+        auto output_builder_it = node_builders.find("output");
+        if (output_builder_it == node_builders.end())
+        {
+            LOG(ERROR, "MNOutput builder not found in registry");
+            return nullptr;
+        }
+        auto output_node = output_builder_it->second(configs, &output_ios, &output_ios, 3);
+        if (!output_node)
+        {
+            LOG(ERROR, "Failed to create MNOutput node");
+            return nullptr;
+        }
+
+        auto *input_node_ptr = dag->addNode(input_node);
         auto *feature_node_ptr = dag->addNode(feature_node);
         auto *inference_node_ptr = dag->addNode(inference_node);
+        auto *output_node_ptr = dag->addNode(output_node);
 
-        if (!feature_node_ptr || !inference_node_ptr)
+        if (!input_node_ptr || !feature_node_ptr || !inference_node_ptr || !output_node_ptr)
         {
             LOG(ERROR, "Failed to add nodes to DAG");
             return nullptr;
         }
 
-        if (!dag->addEdge(feature_node_ptr, inference_node_ptr))
+        if (!dag->addEdge(input_node_ptr, feature_node_ptr) || !dag->addEdge(feature_node_ptr, inference_node_ptr)
+            || !dag->addEdge(inference_node_ptr, output_node_ptr))
         {
-            LOG(ERROR, "Failed to create edge between nodes");
+            LOG(ERROR, "Failed to create edges between nodes");
             return nullptr;
         }
 
-        LOG(INFO, "SoundClassificationDAG created successfully with 2 nodes");
+        LOG(INFO, "SoundClassificationDAG created successfully with 4 nodes (MNInput -> FeatureExtractor -> "
+                  "SpeechCommands -> MNOutput)");
         return dag;
     }
 
@@ -92,14 +125,6 @@ namespace algorithms { namespace dag {
         LOG(DEBUG, "Creating feature tensor: float32[%zu]", FEATURE_COUNT);
 
         core::Tensor::Shape shape(std::vector<int> { static_cast<int>(FEATURE_COUNT) });
-        return allocateAlignedTensor<float>(shape, core::Tensor::Type::Float32);
-    }
-
-    std::shared_ptr<core::Tensor> SoundClassificationDAGBuilder::createOutputTensor(size_t output_size)
-    {
-        LOG(DEBUG, "Creating output tensor: float32[%zu]", output_size);
-
-        core::Tensor::Shape shape(std::vector<int> { static_cast<int>(output_size) });
         return allocateAlignedTensor<float>(shape, core::Tensor::Type::Float32);
     }
 
@@ -185,34 +210,6 @@ namespace algorithms { namespace dag {
         return tensor;
     }
 
-    size_t SoundClassificationDAGBuilder::getOutputSize(const core::ConfigMap &configs)
-    {
-        if (auto it = configs.find("output_classes"); it != configs.end())
-        {
-            if (auto output_classes = std::get_if<int>(&it->second))
-            {
-                LOG(INFO, "Using explicitly configured output classes: %d", *output_classes);
-                return static_cast<size_t>(std::max(1, *output_classes));
-            }
-        }
-        return 100;
-    }
-
-    size_t SoundClassificationDAG::getActualOutputSize() const noexcept
-    {
-        auto output_node = node("SpeechCommandsNode");
-        if (output_node && !output_node->outputs().empty())
-        {
-            auto output_mio = output_node->outputs()[0];
-            if (output_mio && output_mio->operator()())
-            {
-                auto output_tensor = output_mio->operator()();
-                return static_cast<size_t>(output_tensor->shape().dot());
-            }
-        }
-        return 0;
-    }
-
     core::Status SoundClassificationDAGBuilder::validateConfig(const core::ConfigMap &configs)
     {
         if (auto it = configs.find("engine_id"); it != configs.end())
@@ -259,22 +256,6 @@ namespace algorithms { namespace dag {
                 return STATUS(EINVAL, "graph_id must be an integer");
             }
         }
-
-        if (auto it = configs.find("output_classes"); it != configs.end())
-        {
-            if (auto output_classes = std::get_if<int>(&it->second))
-            {
-                if (*output_classes < 1 || *output_classes > 1000)
-                {
-                    return STATUS(EINVAL, "output_classes must be between 1 and 1000");
-                }
-            }
-            else
-            {
-                return STATUS(EINVAL, "output_classes must be an integer");
-            }
-        }
-
         return STATUS_OK();
     }
 

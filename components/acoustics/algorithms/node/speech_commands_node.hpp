@@ -24,10 +24,14 @@ namespace algorithms { namespace node {
 
         core::Status config(const core::ConfigMap &configs) noexcept override;
 
+        core::Status initialize() noexcept;
+
+        core::Status validateTensors(const module::MIOS &inputs, const module::MIOS &outputs) const noexcept;
+
     protected:
         core::Status forward(const module::MIOS &inputs, module::MIOS &outputs) noexcept override;
 
-        size_t getModelOutputSize() const noexcept;
+        size_t getModelOutputClasses() const noexcept;
 
     private:
         std::shared_ptr<hal::Engine> _engine;
@@ -39,14 +43,9 @@ namespace algorithms { namespace node {
         int _graph_id;
 
         bool _initialized;
-
-        core::Status initialize() noexcept;
-
-        core::Status validateTensors(const module::MIOS &inputs, const module::MIOS &outputs) const noexcept;
+        size_t _model_output_classes;
 
         core::Status copyInputData(core::Tensor *input_tensor, core::Tensor *model_input_tensor) const noexcept;
-
-        core::Status copyOutputData(core::Tensor *model_output_tensor, core::Tensor *output_tensor) const noexcept;
     };
 
     std::shared_ptr<module::MNode> createSpeechCommandsNode(const core::ConfigMap &configs, module::MIOS *inputs,

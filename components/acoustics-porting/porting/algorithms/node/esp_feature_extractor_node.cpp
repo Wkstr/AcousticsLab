@@ -4,10 +4,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <numbers>
 
 namespace porting { namespace algorithms { namespace node {
 
-    static const float PI = 3.14159265358979323846264338327950288419716939937510582097494459231f;
+    static constexpr float pi_v = std::numbers::pi_v<float>;
 
     ESPFeatureExtractorNode::ESPFeatureExtractorNode(const core::ConfigMap &configs, module::MIOS inputs,
         module::MIOS outputs, int priority)
@@ -41,23 +42,8 @@ namespace porting { namespace algorithms { namespace node {
 
     core::Status ESPFeatureExtractorNode::forward(const module::MIOS &inputs, module::MIOS &outputs) noexcept
     {
-        if (!_initialized)
-        {
-            auto status = initialize();
-            if (!status)
-            {
-                return status;
-            }
-        }
-
-        auto status = validateTensors(inputs, outputs);
-        if (!status)
-        {
-            return status;
-        }
-
-        auto input_tensor = inputs[0]->operator()();
-        auto output_tensor = outputs[0]->operator()();
+        const auto &input_tensor = inputs[0]->operator()();
+        const auto &output_tensor = outputs[0]->operator()();
 
         const int16_t *raw_audio_data = input_tensor->data<int16_t>();
         float *output_features = output_tensor->data<float>();
@@ -82,9 +68,9 @@ namespace porting { namespace algorithms { namespace node {
             {
                 float real = _fft_input_buffer[j * 2 + 0];
                 float imag = _fft_input_buffer[j * 2 + 1];
-                float mag = sqrtf(real * real + imag * imag);
-                current_log_features[j]
-                    = logf(mag < std::numeric_limits<float>::epsilon() ? std::numeric_limits<float>::epsilon() : mag);
+                float mag = std::sqrtf(real * real + imag * imag);
+                current_log_features[j] = std::logf(
+                    mag < std::numeric_limits<float>::epsilon() ? std::numeric_limits<float>::epsilon() : mag);
             }
         }
 
@@ -118,28 +104,17 @@ namespace porting { namespace algorithms { namespace node {
             return STATUS(EFAULT, "ESP-DL RFFT initialization failed");
         }
 
-        auto status = initBlackmanWindow();
-        if (!status)
-        {
-            return status;
-        }
-
-        _initialized = true;
-        LOG(INFO, "ESPFeatureExtractorNode initialized successfully");
-        return STATUS_OK();
-    }
-
-    core::Status ESPFeatureExtractorNode::initBlackmanWindow() noexcept
-    {
         LOG(DEBUG, "Initializing Blackman window with %zu coefficients", FRAME_LEN);
-
         for (size_t n = 0; n < FRAME_LEN; ++n)
         {
             float n_norm = static_cast<float>(n) / static_cast<float>(FRAME_LEN);
-            _blackman_window[n] = 0.42f - 0.5f * cos(2.0f * PI * n_norm) + 0.08f * cos(4.0f * PI * n_norm);
+            _blackman_window[n]
+                = 0.42f - 0.5f * std::cos(2.0f * pi_v * n_norm) + 0.08f * std::cos(4.0f * pi_v * n_norm);
         }
-
         LOG(DEBUG, "Blackman window initialized successfully");
+
+        _initialized = true;
+        LOG(INFO, "ESPFeatureExtractorNode initialized successfully");
         return STATUS_OK();
     }
 
@@ -193,7 +168,7 @@ namespace porting { namespace algorithms { namespace node {
             variance += diff * diff;
         }
         variance /= total_features;
-        float std_dev = sqrtf(variance);
+        float std_dev = std::sqrtf(variance);
 
         const float epsilon = std::numeric_limits<float>::epsilon();
         float inv_std = 1.0f / (std_dev + epsilon);
@@ -212,8 +187,26 @@ namespace porting { namespace algorithms { namespace node {
         module::MIOS input_mios = inputs ? *inputs : module::MIOS {};
         module::MIOS output_mios = outputs ? *outputs : module::MIOS {};
 
-        return std::make_shared<ESPFeatureExtractorNode>(configs, std::move(input_mios), std::move(output_mios),
+        auto node = std::make_shared<ESPFeatureExtractorNode>(configs, std::move(input_mios), std::move(output_mios),
             priority);
+
+        auto init_status = node->initialize();
+        if (!init_status)
+        {
+            LOG(ERROR, "Failed to initialize ESPFeatureExtractorNode: %s", init_status.message().c_str());
+            return nullptr;
+        }
+
+        module::MIOS validate_inputs = inputs ? *inputs : module::MIOS {};
+        module::MIOS validate_outputs = outputs ? *outputs : module::MIOS {};
+        auto validate_status = node->validateTensors(validate_inputs, validate_outputs);
+        if (!validate_status)
+        {
+            LOG(ERROR, "ESPFeatureExtractorNode tensor validation failed: %s", validate_status.message().c_str());
+            return nullptr;
+        }
+
+        return node;
     }
 
 }}} // namespace porting::algorithms::node

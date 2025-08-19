@@ -30,10 +30,10 @@ namespace porting { namespace algorithms { namespace node {
 
         virtual core::Tensor::Type getOutputDataType() const noexcept = 0;
 
+        virtual core::Status validateTensors(const module::MIOS &inputs, const module::MIOS &outputs) const noexcept;
+
     protected:
         virtual core::Status forward(const module::MIOS &inputs, module::MIOS &outputs) noexcept = 0;
-
-        virtual core::Status validateTensors(const module::MIOS &inputs, const module::MIOS &outputs) const noexcept;
     };
 
 }}} // namespace porting::algorithms::node

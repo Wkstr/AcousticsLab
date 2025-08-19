@@ -1,5 +1,6 @@
 #include "speech_commands_node.hpp"
 #include "core/logger.hpp"
+#include "core/types.hpp"
 #include "hal/engine.hpp"
 
 #include <algorithm>
@@ -11,34 +12,10 @@ namespace algorithms { namespace node {
     SpeechCommandsNode::SpeechCommandsNode(const core::ConfigMap &configs, module::MIOS inputs, module::MIOS outputs,
         int priority)
         : module::MNode("SpeechCommandsNode", std::move(inputs), std::move(outputs), priority), _engine(nullptr),
-          _model(nullptr), _graph(nullptr), _engine_id(1), _model_id(1), _graph_id(0), _initialized(false)
+          _model(nullptr), _graph(nullptr), _engine_id(1), _model_id(1), _graph_id(0), _initialized(false),
+          _model_output_classes(0)
     {
         LOG(DEBUG, "Creating SpeechCommandsNode with priority %d", priority);
-
-        if (auto it = configs.find("engine_id"); it != configs.end())
-        {
-            if (auto engine_id = std::get_if<int>(&it->second))
-            {
-                _engine_id = *engine_id;
-            }
-        }
-
-        if (auto it = configs.find("model_id"); it != configs.end())
-        {
-            if (auto model_id = std::get_if<int>(&it->second))
-            {
-                _model_id = *model_id;
-            }
-        }
-
-        if (auto it = configs.find("graph_id"); it != configs.end())
-        {
-            if (auto graph_id = std::get_if<int>(&it->second))
-            {
-                _graph_id = *graph_id;
-            }
-        }
-
         LOG(INFO, "SpeechCommandsNode configured: engine_id=%d, model_id=%d, graph_id=%d", _engine_id, _model_id,
             _graph_id);
     }
@@ -51,78 +28,15 @@ namespace algorithms { namespace node {
     core::Status SpeechCommandsNode::config(const core::ConfigMap &configs) noexcept
     {
         LOG(DEBUG, "Reconfiguring SpeechCommandsNode");
-
-        bool config_changed = false;
-
-        if (auto it = configs.find("engine_id"); it != configs.end())
-        {
-            if (auto engine_id = std::get_if<int>(&it->second))
-            {
-                if (*engine_id != _engine_id)
-                {
-                    _engine_id = *engine_id;
-                    config_changed = true;
-                }
-            }
-        }
-
-        if (auto it = configs.find("model_id"); it != configs.end())
-        {
-            if (auto model_id = std::get_if<int>(&it->second))
-            {
-                if (*model_id != _model_id)
-                {
-                    _model_id = *model_id;
-                    config_changed = true;
-                }
-            }
-        }
-
-        if (auto it = configs.find("graph_id"); it != configs.end())
-        {
-            if (auto graph_id = std::get_if<int>(&it->second))
-            {
-                if (*graph_id != _graph_id)
-                {
-                    _graph_id = *graph_id;
-                    config_changed = true;
-                }
-            }
-        }
-
-        if (config_changed)
-        {
-            _initialized = false;
-            _engine.reset();
-            _model.reset();
-            _graph.reset();
-
-            LOG(INFO, "SpeechCommandsNode reconfigured: engine_id=%d, model_id=%d, graph_id=%d", _engine_id, _model_id,
-                _graph_id);
-        }
-
+        LOG(INFO, "SpeechCommandsNode using default configuration: engine_id=%d, model_id=%d, graph_id=%d", _engine_id,
+            _model_id, _graph_id);
         return STATUS_OK();
     }
 
     core::Status SpeechCommandsNode::forward(const module::MIOS &inputs, module::MIOS &outputs) noexcept
     {
-        if (!_initialized)
-        {
-            auto status = initialize();
-            if (!status)
-            {
-                return status;
-            }
-        }
-
-        auto status = validateTensors(inputs, outputs);
-        if (!status)
-        {
-            return status;
-        }
-
-        auto input_tensor = inputs[0]->operator()();
-        auto output_tensor = outputs[0]->operator()();
+        const auto &input_tensor = inputs[0]->operator()();
+        const auto &output_tensor = outputs[0]->operator()();
 
         if (!input_tensor || !output_tensor)
         {
@@ -137,7 +51,7 @@ namespace algorithms { namespace node {
             return STATUS(EFAULT, "Model input or output tensor is null");
         }
 
-        status = copyInputData(input_tensor, model_input_tensor);
+        auto status = copyInputData(input_tensor, model_input_tensor);
         if (!status)
         {
             return status;
@@ -150,20 +64,70 @@ namespace algorithms { namespace node {
             return status;
         }
 
-        status = copyOutputData(model_output_tensor, output_tensor);
-        if (!status)
+        if (output_tensor->dtype() != core::Tensor::Type::Class)
         {
-            return status;
+            return STATUS(EINVAL, "Output tensor must be of class_t type");
         }
 
-        LOG(DEBUG, "InferenceNode forward completed successfully");
+        const core::Tensor::Shape new_shape(1, static_cast<int>(_model_output_classes));
+        if (!output_tensor->reshape(new_shape))
+        {
+            return STATUS(EINVAL, "Failed to reshape output tensor");
+        }
+
+        core::class_t *class_data = output_tensor->data<core::class_t>();
+        if (!class_data)
+        {
+            return STATUS(EFAULT, "Failed to get class_t data pointer");
+        }
+
+        if (model_output_tensor->dtype() == core::Tensor::Type::Float32)
+        {
+            const float *model_data = model_output_tensor->data<float>();
+            if (!model_data)
+            {
+                return STATUS(EFAULT, "Failed to get model output data pointer");
+            }
+
+            for (size_t i = 0; i < _model_output_classes; ++i)
+            {
+                class_data[i] = { static_cast<int>(i), model_data[i] };
+            }
+            LOG(DEBUG, "Processed %zu float32 output elements to class_t", _model_output_classes);
+        }
+        else if (model_output_tensor->dtype() == core::Tensor::Type::Int8)
+        {
+            const int8_t *model_data = model_output_tensor->data<int8_t>();
+            if (!model_data)
+            {
+                return STATUS(EFAULT, "Failed to get model output data pointer");
+            }
+
+            auto quant_params = _graph->outputQuantParams(0);
+            float scale = quant_params.scale();
+            int32_t zero_point = quant_params.zeroPoint();
+
+            for (size_t i = 0; i < _model_output_classes; ++i)
+            {
+                float confidence = static_cast<float>(model_data[i] - zero_point) * scale;
+                class_data[i] = { static_cast<int>(i), confidence };
+            }
+            LOG(DEBUG, "Dequantized and processed %zu int8 output elements to class_t (scale=%.6f, zero_point=%ld)",
+                _model_output_classes, scale, (long)zero_point);
+        }
+        else
+        {
+            return STATUS(ENOTSUP, "Unsupported model output tensor data type");
+        }
+
+        LOG(DEBUG, "SpeechCommandsNode forward completed successfully");
 
         return STATUS_OK();
     }
 
     core::Status SpeechCommandsNode::initialize() noexcept
     {
-        LOG(DEBUG, "Initializing InferenceNode");
+        LOG(DEBUG, "Initializing SpeechCommandsNode");
 
         _engine = std::shared_ptr<hal::Engine>(hal::EngineRegistry::getEngine(_engine_id), [](hal::Engine *) { });
         if (!_engine)
@@ -199,15 +163,13 @@ namespace algorithms { namespace node {
         }
 
         auto model_output_tensor = _graph->output(0);
-        if (model_output_tensor)
+        if (!model_output_tensor)
         {
-            size_t actual_output_size = static_cast<size_t>(model_output_tensor->shape().dot());
-            LOG(INFO, "Model actual output size: %zu classes", actual_output_size);
+            return STATUS(EFAULT, "Model graph has no output tensor");
         }
-        else
-        {
-            LOG(WARNING, "Could not get model output tensor information");
-        }
+
+        _model_output_classes = static_cast<size_t>(model_output_tensor->shape().dot());
+        LOG(INFO, "Model initialized with %zu output classes", _model_output_classes);
 
         _initialized = true;
         LOG(INFO, "SpeechCommandsNode initialized successfully");
@@ -220,16 +182,16 @@ namespace algorithms { namespace node {
     {
         if (inputs.size() != 1)
         {
-            return STATUS(EINVAL, "InferenceNode requires exactly 1 input tensor");
+            return STATUS(EINVAL, "SpeechCommandsNode requires exactly 1 input tensor");
         }
 
         if (outputs.size() != 1)
         {
-            return STATUS(EINVAL, "InferenceNode requires exactly 1 output tensor");
+            return STATUS(EINVAL, "SpeechCommandsNode requires exactly 1 output tensor");
         }
 
-        auto input_tensor = inputs[0]->operator()();
-        auto output_tensor = outputs[0]->operator()();
+        const auto &input_tensor = inputs[0]->operator()();
+        const auto &output_tensor = outputs[0]->operator()();
 
         if (!input_tensor || !output_tensor)
         {
@@ -357,111 +319,9 @@ namespace algorithms { namespace node {
         return STATUS_OK();
     }
 
-    core::Status SpeechCommandsNode::copyOutputData(core::Tensor *model_output_tensor,
-        core::Tensor *output_tensor) const noexcept
+    size_t SpeechCommandsNode::getModelOutputClasses() const noexcept
     {
-        const size_t model_output_size = static_cast<size_t>(model_output_tensor->shape().dot());
-        const size_t output_tensor_capacity = static_cast<size_t>(output_tensor->shape().dot());
-        const size_t elements_to_copy = std::min(model_output_size, output_tensor_capacity);
-
-        if (elements_to_copy == 0)
-        {
-            return STATUS(EINVAL, "No elements to copy");
-        }
-
-        LOG(DEBUG, "Model output size: %zu, Output tensor capacity: %zu, Copying: %zu elements", model_output_size,
-            output_tensor_capacity, elements_to_copy);
-
-        if (model_output_tensor->dtype() == core::Tensor::Type::Float32)
-        {
-            const float *model_data = model_output_tensor->data<float>();
-            if (!model_data)
-            {
-                return STATUS(EFAULT, "Failed to get model output data pointer");
-            }
-
-            if (output_tensor->dtype() == core::Tensor::Type::Float32)
-            {
-                float *output_data = output_tensor->data<float>();
-                if (!output_data)
-                {
-                    return STATUS(EFAULT, "Failed to get output data pointer");
-                }
-                std::memcpy(output_data, model_data, elements_to_copy * sizeof(float));
-                LOG(DEBUG, "Copied %zu float32 output elements (direct copy)", elements_to_copy);
-            }
-            else
-            {
-                return STATUS(ENOTSUP, "Unsupported output tensor data type for float32 model");
-            }
-        }
-        else if (model_output_tensor->dtype() == core::Tensor::Type::Int8)
-        {
-            const int8_t *model_data = model_output_tensor->data<int8_t>();
-            if (!model_data)
-            {
-                return STATUS(EFAULT, "Failed to get model output data pointer");
-            }
-
-            auto output_quant_params = _graph->outputQuantParams(0);
-            float scale = output_quant_params.scale();
-            int32_t zero_point = output_quant_params.zeroPoint();
-
-            if (output_tensor->dtype() == core::Tensor::Type::Float32)
-            {
-                float *output_data = output_tensor->data<float>();
-                if (!output_data)
-                {
-                    return STATUS(EFAULT, "Failed to get output data pointer");
-                }
-
-                for (size_t i = 0; i < elements_to_copy; ++i)
-                {
-                    output_data[i] = static_cast<float>(model_data[i] - zero_point) * scale;
-                }
-                LOG(DEBUG, "Dequantized and copied %zu int8 to float32 output elements (scale=%.6f, zero_point=%ld)",
-                    elements_to_copy, scale, (long)zero_point);
-            }
-            else
-            {
-                return STATUS(ENOTSUP, "Unsupported output tensor data type for int8 model");
-            }
-        }
-        else
-        {
-            return STATUS(ENOTSUP, "Unsupported model output tensor data type");
-        }
-
-        if (output_tensor_capacity > model_output_size && output_tensor->dtype() == core::Tensor::Type::Float32)
-        {
-            float *output_data = output_tensor->data<float>();
-            if (output_data)
-            {
-                // Zero out the unused portion
-                std::memset(output_data + model_output_size, 0,
-                    (output_tensor_capacity - model_output_size) * sizeof(float));
-                LOG(DEBUG, "Cleared unused portion of output tensor: elements %zu-%zu", model_output_size,
-                    output_tensor_capacity - 1);
-            }
-        }
-
-        return STATUS_OK();
-    }
-
-    size_t SpeechCommandsNode::getModelOutputSize() const noexcept
-    {
-        if (!_initialized || !_graph)
-        {
-            return 0;
-        }
-
-        auto model_output_tensor = _graph->output(0);
-        if (!model_output_tensor)
-        {
-            return 0;
-        }
-
-        return static_cast<size_t>(model_output_tensor->shape().dot());
+        return _model_output_classes;
     }
 
     std::shared_ptr<module::MNode> createSpeechCommandsNode(const core::ConfigMap &configs, module::MIOS *inputs,
@@ -472,7 +332,26 @@ namespace algorithms { namespace node {
         module::MIOS input_mios = inputs ? *inputs : module::MIOS {};
         module::MIOS output_mios = outputs ? *outputs : module::MIOS {};
 
-        return std::make_shared<SpeechCommandsNode>(configs, std::move(input_mios), std::move(output_mios), priority);
+        auto node
+            = std::make_shared<SpeechCommandsNode>(configs, std::move(input_mios), std::move(output_mios), priority);
+
+        auto init_status = node->initialize();
+        if (!init_status)
+        {
+            LOG(ERROR, "Failed to initialize SpeechCommandsNode: %s", init_status.message().c_str());
+            return nullptr;
+        }
+
+        module::MIOS validate_inputs = inputs ? *inputs : module::MIOS {};
+        module::MIOS validate_outputs = outputs ? *outputs : module::MIOS {};
+        auto validate_status = node->validateTensors(validate_inputs, validate_outputs);
+        if (!validate_status)
+        {
+            LOG(ERROR, "SpeechCommandsNode tensor validation failed: %s", validate_status.message().c_str());
+            return nullptr;
+        }
+
+        return node;
     }
 
 }} // namespace algorithms::node

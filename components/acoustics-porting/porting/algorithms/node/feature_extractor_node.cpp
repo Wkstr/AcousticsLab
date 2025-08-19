@@ -16,8 +16,8 @@ namespace porting { namespace algorithms { namespace node {
             return STATUS(EINVAL, "FeatureExtractorNode requires exactly 1 output tensor");
         }
 
-        auto input_tensor = inputs[0]->operator()();
-        auto output_tensor = outputs[0]->operator()();
+        const auto &input_tensor = inputs[0]->operator()();
+        const auto &output_tensor = outputs[0]->operator()();
 
         if (!input_tensor || !output_tensor)
         {

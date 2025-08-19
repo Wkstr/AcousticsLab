@@ -11,45 +11,50 @@
 #include <memory>
 #include <string>
 
-namespace algorithms { namespace node {
-    class SpeechCommandsNode;
-}} // namespace algorithms::node
-
 namespace algorithms { namespace dag {
 
-    class SoundClassificationDAG final: public module::MDAG
+    class SoundClassificationDAG
     {
     public:
-        explicit SoundClassificationDAG(std::string_view name) noexcept : module::MDAG(name) { }
+        explicit SoundClassificationDAG(std::string_view name) noexcept : _dag(std::make_shared<module::MDAG>(name)) { }
 
-        std::shared_ptr<core::Tensor> getInputTensor(size_t index = 0) const noexcept override
+        module::MNode *addNode(std::shared_ptr<module::MNode> node) noexcept
         {
-            auto input_node = node("ESPFeatureExtractorNode");
-            if (input_node && !input_node->inputs().empty() && index < input_node->inputs().size())
-            {
-                auto mio = input_node->inputs()[index];
-                if (mio && mio->operator()())
-                {
-                    return std::shared_ptr<core::Tensor>(mio->operator()(), [](core::Tensor *) { });
-                }
-            }
-            return nullptr;
+            return _dag->addNode(node);
         }
 
-        std::shared_ptr<core::Tensor> getOutputTensor(size_t index = 0) const noexcept override
+        bool addEdge(module::MNode *from, module::MNode *to) noexcept
         {
-            auto output_node = node("SpeechCommandsNode");
-            if (output_node && !output_node->outputs().empty() && index < output_node->outputs().size())
-            {
-                auto mio = output_node->outputs()[index];
-                if (mio && mio->operator()())
-                {
-                    return std::shared_ptr<core::Tensor>(mio->operator()(), [](core::Tensor *) { });
-                }
-            }
-            return nullptr;
+            return _dag->addEdge(from, to);
         }
-        size_t getActualOutputSize() const noexcept;
+
+        module::MNode *node(std::string_view name) const noexcept
+        {
+            return _dag->node(name);
+        }
+
+        const std::forward_list<std::shared_ptr<module::MNode>> &nodes() const noexcept
+        {
+            return _dag->nodes();
+        }
+
+        core::Status operator()() noexcept
+        {
+            return _dag->operator()();
+        }
+
+        core::Status operator()(core::Reporter &reporter) noexcept
+        {
+            return _dag->operator()(reporter);
+        }
+
+        std::shared_ptr<module::MDAG> getDAG() const noexcept
+        {
+            return _dag;
+        }
+
+    private:
+        std::shared_ptr<module::MDAG> _dag;
     };
 
     class SoundClassificationDAGBuilder
@@ -67,8 +72,6 @@ namespace algorithms { namespace dag {
 
         static std::shared_ptr<core::Tensor> createFeatureTensor();
 
-        static std::shared_ptr<core::Tensor> createOutputTensor(size_t output_size = 100);
-
         static std::shared_ptr<module::MNode> createFeatureExtractorNode(const core::ConfigMap &configs,
             std::shared_ptr<module::MIO> input_mio, std::shared_ptr<module::MIO> output_mio);
 
@@ -78,8 +81,6 @@ namespace algorithms { namespace dag {
         template<typename T>
         static std::shared_ptr<core::Tensor> allocateAlignedTensor(const core::Tensor::Shape &shape,
             core::Tensor::Type type);
-
-        static size_t getOutputSize(const core::ConfigMap &configs);
 
         static core::Status validateConfig(const core::ConfigMap &configs);
     };
