@@ -640,6 +640,7 @@ struct TaskGEDAD final
                 }
                 shared::buffer_tail = _current_id;
             }
+            _last_sync_time = s;
 
             const float anomaly_threshold = std::max(0.0f, std::min(shared::anomaly_threshold.load(), 1.0f));
 
