@@ -95,7 +95,7 @@ public:
     class QuantParams final
     {
     public:
-        explicit QuantParams(float scale = 1.0f, int32_t zero_point = 0) noexcept
+        explicit constexpr QuantParams(float scale = 1.0f, int32_t zero_point = 0) noexcept
             : _scale(scale), _zero_point(zero_point)
         {
             if (std::isnan(_scale) || std::isinf(_scale) || _scale <= std::numeric_limits<float>::epsilon())
@@ -254,7 +254,8 @@ public:
 
 protected:
     template<typename T>
-    explicit Tensor(Type dtype, size_t dsize, T &&shape, std::shared_ptr<std::byte[]> &&data, size_t size) noexcept
+    explicit constexpr Tensor(Type dtype, size_t dsize, T &&shape, std::shared_ptr<std::byte[]> &&data,
+        size_t size) noexcept
         : _dtype(dtype), _dsize(dsize), _shape(std::forward<T>(shape)), _data(std::move(data)), _size(size)
     {
     }

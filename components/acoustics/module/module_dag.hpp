@@ -47,7 +47,7 @@ public:
         return _dags;
     }
 
-    static constexpr core::Status registerDAGBuilder(std::string_view name, DAGBuilder builder) noexcept;
+    static core::Status registerDAGBuilder(std::string_view name, DAGBuilder builder) noexcept;
 
 private:
     static DAGBuilderMap _dags;
