@@ -17,6 +17,12 @@ class MNInput final: public module::MNode
 public:
     static inline constexpr const std::string_view node_name = "input";
 
+    template<typename IS, typename OS>
+    constexpr explicit MNInput(IS &&inputs, OS &&outputs, int priority) noexcept
+        : module::MNode(std::string(node_name), std::forward<IS>(inputs), std::forward<OS>(outputs), priority)
+    {
+    }
+
     ~MNInput() override = default;
 
     static std::shared_ptr<MNode> create(const core::ConfigMap &configs, MIOS *inputs, MIOS *outputs, int priority)
@@ -36,12 +42,6 @@ public:
     }
 
 private:
-    template<typename IS, typename OS>
-    constexpr explicit MNInput(IS &&inputs, OS &&outputs, int priority) noexcept
-        : module::MNode(std::string(node_name), std::forward<IS>(inputs), std::forward<OS>(outputs), priority)
-    {
-    }
-
     inline core::Status forward(const MIOS &inputs, MIOS &outputs) noexcept override
     {
         return STATUS_OK();
