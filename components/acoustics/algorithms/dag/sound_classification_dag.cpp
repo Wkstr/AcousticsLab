@@ -1,274 +1,35 @@
 #include "sound_classification_dag.hpp"
 #include "core/logger.hpp"
-#include "hal/engine.hpp"
 #include "module/module_dag.hpp"
-#include "module/module_node.hpp"
-#include "module/node/node_input.hpp"
-#include "module/node/node_output.hpp"
 
-#include <algorithm>
-#include <esp_heap_caps.h>
-#include <string>
+namespace bridge {
 
-namespace algorithms { namespace dag {
+void __REGISTER_MODULE_DAG_BUILDER__()
+{
+    LOG(INFO, "Registering module DAG builders");
 
-    std::shared_ptr<module::MDAG> SoundClassificationDAGBuilder::create(const core::ConfigMap &configs)
+    // Register SoundClassificationDAG
+    auto status = module::MDAGBuilderRegistry::registerDAGBuilder("SoundClassification",
+        algorithms::dag::createSoundClassification);
+
+    if (!status)
     {
-        LOG(INFO, "Creating SoundClassificationDAG");
-
-        auto status = validateConfig(configs);
-        if (!status)
-        {
-            LOG(ERROR, "Invalid DAG configuration: %s", status.message().c_str());
-            return nullptr;
-        }
-
-        auto sound_dag = std::make_shared<SoundClassificationDAG>("SoundClassificationDAG");
-        auto dag = sound_dag->getDAG();
-        const auto &input_tensor = createInputTensor();
-        const auto &feature_tensor = createFeatureTensor();
-
-        if (!input_tensor || !feature_tensor)
-        {
-            LOG(ERROR, "Failed to create DAG tensors");
-            return nullptr;
-        }
-
-        auto input_mio = std::make_shared<module::MIO>(input_tensor, "audio_input");
-        auto feature_mio = std::make_shared<module::MIO>(feature_tensor, "feature_data");
-
-        const auto &output_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Class,
-            core::Tensor::Shape(1, 100));
-        if (!output_tensor)
-        {
-            LOG(ERROR, "Failed to create output tensor");
-            return nullptr;
-        }
-        auto output_mio = std::make_shared<module::MIO>(output_tensor, "classification_output");
-
-        module::MIOS input_ios = { input_mio };
-        const auto &node_builders = module::MNodeBuilderRegistry::getNodeBuilderMap();
-        auto input_builder_it = node_builders.find("input");
-        if (input_builder_it == node_builders.end())
-        {
-            LOG(ERROR, "MNInput builder not found in registry");
-            return nullptr;
-        }
-        auto input_node = input_builder_it->second(configs, &input_ios, &input_ios, 0);
-        if (!input_node)
-        {
-            LOG(ERROR, "Failed to create MNInput node");
-            return nullptr;
-        }
-
-        auto feature_node = createFeatureExtractorNode(configs, input_mio, feature_mio);
-        if (!feature_node)
-        {
-            LOG(ERROR, "Failed to create feature extractor node");
-            return nullptr;
-        }
-
-        auto inference_node = createInferenceNode(configs, feature_mio, output_mio);
-        if (!inference_node)
-        {
-            LOG(ERROR, "Failed to create inference node");
-            return nullptr;
-        }
-
-        module::MIOS output_ios = { output_mio };
-        auto output_builder_it = node_builders.find("output");
-        if (output_builder_it == node_builders.end())
-        {
-            LOG(ERROR, "MNOutput builder not found in registry");
-            return nullptr;
-        }
-        auto output_node = output_builder_it->second(configs, &output_ios, &output_ios, 3);
-        if (!output_node)
-        {
-            LOG(ERROR, "Failed to create MNOutput node");
-            return nullptr;
-        }
-
-        auto *input_node_ptr = dag->addNode(input_node);
-        auto *feature_node_ptr = dag->addNode(feature_node);
-        auto *inference_node_ptr = dag->addNode(inference_node);
-        auto *output_node_ptr = dag->addNode(output_node);
-
-        if (!input_node_ptr || !feature_node_ptr || !inference_node_ptr || !output_node_ptr)
-        {
-            LOG(ERROR, "Failed to add nodes to DAG");
-            return nullptr;
-        }
-
-        if (!dag->addEdge(input_node_ptr, feature_node_ptr) || !dag->addEdge(feature_node_ptr, inference_node_ptr)
-            || !dag->addEdge(inference_node_ptr, output_node_ptr))
-        {
-            LOG(ERROR, "Failed to create edges between nodes");
-            return nullptr;
-        }
-
-        LOG(INFO, "SoundClassificationDAG created successfully with 4 nodes (MNInput -> FeatureExtractor -> "
-                  "SpeechCommands -> MNOutput)");
-        return dag;
+        LOG(ERROR, "Failed to register SoundClassification: %s", status.message().c_str());
+    }
+    else
+    {
+        LOG(INFO, "Successfully registered SoundClassification");
     }
 
-    std::shared_ptr<core::Tensor> SoundClassificationDAGBuilder::createInputTensor()
+    // Log all registered DAGs for debugging
+    const auto &dag_map = module::MDAGBuilderRegistry::getDAGBuilderMap();
+    LOG(INFO, "Total registered DAGs: %zu", dag_map.size());
+#if LOG_LEVEL >= DEBUG
+    for (const auto &[name, builder]: dag_map)
     {
-        LOG(DEBUG, "Creating input tensor: int16[%zu]", AUDIO_SAMPLES);
-
-        core::Tensor::Shape shape(std::vector<int> { static_cast<int>(AUDIO_SAMPLES) });
-        return allocateAlignedTensor<int16_t>(shape, core::Tensor::Type::Int16);
+        LOG(DEBUG, "  - %s", name.data());
     }
+#endif
+}
 
-    std::shared_ptr<core::Tensor> SoundClassificationDAGBuilder::createFeatureTensor()
-    {
-        LOG(DEBUG, "Creating feature tensor: float32[%zu]", FEATURE_COUNT);
-
-        core::Tensor::Shape shape(std::vector<int> { static_cast<int>(FEATURE_COUNT) });
-        return allocateAlignedTensor<float>(shape, core::Tensor::Type::Float32);
-    }
-
-    std::shared_ptr<module::MNode> SoundClassificationDAGBuilder::createFeatureExtractorNode(
-        const core::ConfigMap &configs, std::shared_ptr<module::MIO> input_mio, std::shared_ptr<module::MIO> output_mio)
-    {
-        LOG(DEBUG, "Creating %s", FEATURE_EXTRACTOR_NODE_NAME);
-
-        const auto &node_builders = module::MNodeBuilderRegistry::getNodeBuilderMap();
-        auto it = node_builders.find(FEATURE_EXTRACTOR_NODE_NAME);
-        if (it == node_builders.end())
-        {
-            LOG(ERROR, "%s builder not found in registry", FEATURE_EXTRACTOR_NODE_NAME);
-            return nullptr;
-        }
-
-        module::MIOS inputs = { input_mio };
-        module::MIOS outputs = { output_mio };
-
-        auto node = it->second(configs, &inputs, &outputs, 1);
-        if (!node)
-        {
-            LOG(ERROR, "Failed to create %s", FEATURE_EXTRACTOR_NODE_NAME);
-            return nullptr;
-        }
-
-        LOG(DEBUG, "%s created successfully", FEATURE_EXTRACTOR_NODE_NAME);
-        return node;
-    }
-
-    std::shared_ptr<module::MNode> SoundClassificationDAGBuilder::createInferenceNode(const core::ConfigMap &configs,
-        std::shared_ptr<module::MIO> input_mio, std::shared_ptr<module::MIO> output_mio)
-    {
-        LOG(DEBUG, "Creating %s", INFERENCE_NODE_NAME);
-
-        const auto &node_builders = module::MNodeBuilderRegistry::getNodeBuilderMap();
-        auto it = node_builders.find(INFERENCE_NODE_NAME);
-        if (it == node_builders.end())
-        {
-            LOG(ERROR, "%s builder not found in registry", INFERENCE_NODE_NAME);
-            return nullptr;
-        }
-
-        module::MIOS inputs = { input_mio };
-        module::MIOS outputs = { output_mio };
-
-        auto node = it->second(configs, &inputs, &outputs, 2);
-        if (!node)
-        {
-            LOG(ERROR, "Failed to create %s", INFERENCE_NODE_NAME);
-            return nullptr;
-        }
-
-        LOG(DEBUG, "%s created successfully", INFERENCE_NODE_NAME);
-        return node;
-    }
-
-    template<typename T>
-    std::shared_ptr<core::Tensor> SoundClassificationDAGBuilder::allocateAlignedTensor(const core::Tensor::Shape &shape,
-        core::Tensor::Type type)
-    {
-        size_t total_elements = shape.dot();
-        size_t total_bytes = total_elements * sizeof(T);
-
-        void *raw_data = heap_caps_aligned_alloc(16, total_bytes, MALLOC_CAP_SPIRAM);
-        if (!raw_data)
-        {
-            LOG(ERROR, "Failed to allocate %zu bytes of aligned memory", total_bytes);
-            return nullptr;
-        }
-
-        LOG(DEBUG, "Allocated %zu bytes of aligned tensor memory at %p", total_bytes, raw_data);
-
-        std::shared_ptr<std::byte[]> data(reinterpret_cast<std::byte *>(raw_data), [](std::byte *ptr) {
-            if (ptr)
-            {
-                heap_caps_free(ptr);
-            }
-        });
-
-        auto tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(type, shape, data, total_bytes);
-
-        return tensor;
-    }
-
-    core::Status SoundClassificationDAGBuilder::validateConfig(const core::ConfigMap &configs)
-    {
-        if (auto it = configs.find("engine_id"); it != configs.end())
-        {
-            if (auto engine_id = std::get_if<int>(&it->second))
-            {
-                if (*engine_id < 0)
-                {
-                    return STATUS(EINVAL, "engine_id must be non-negative");
-                }
-            }
-            else
-            {
-                return STATUS(EINVAL, "engine_id must be an integer");
-            }
-        }
-
-        if (auto it = configs.find("model_id"); it != configs.end())
-        {
-            if (auto model_id = std::get_if<int>(&it->second))
-            {
-                if (*model_id < 0)
-                {
-                    return STATUS(EINVAL, "model_id must be non-negative");
-                }
-            }
-            else
-            {
-                return STATUS(EINVAL, "model_id must be an integer");
-            }
-        }
-
-        if (auto it = configs.find("graph_id"); it != configs.end())
-        {
-            if (auto graph_id = std::get_if<int>(&it->second))
-            {
-                if (*graph_id < 0)
-                {
-                    return STATUS(EINVAL, "graph_id must be non-negative");
-                }
-            }
-            else
-            {
-                return STATUS(EINVAL, "graph_id must be an integer");
-            }
-        }
-        return STATUS_OK();
-    }
-
-    template std::shared_ptr<core::Tensor> SoundClassificationDAGBuilder::allocateAlignedTensor<int16_t>(
-        const core::Tensor::Shape &shape, core::Tensor::Type type);
-    template std::shared_ptr<core::Tensor> SoundClassificationDAGBuilder::allocateAlignedTensor<float>(
-        const core::Tensor::Shape &shape, core::Tensor::Type type);
-
-    std::shared_ptr<module::MDAG> createSoundClassificationDAG(const core::ConfigMap &configs)
-    {
-        LOG(DEBUG, "Creating SoundClassificationDAG via builder function");
-
-        return SoundClassificationDAGBuilder::create(configs);
-    }
-
-}} // namespace algorithms::dag
+} // namespace bridge

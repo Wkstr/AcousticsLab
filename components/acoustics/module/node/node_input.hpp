@@ -38,7 +38,7 @@ public:
             return {};
         }
 
-        return std::shared_ptr<MNInput>(new MNInput(*inputs, *outputs, priority));
+        return std::make_shared<MNInput>(*inputs, *outputs, priority);
     }
 
 private:

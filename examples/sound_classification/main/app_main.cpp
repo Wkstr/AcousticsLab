@@ -138,8 +138,7 @@ void processClassificationResults(core::Tensor *output_tensor, int classificatio
             return;
         }
 
-        std::cout << "Output tensor info: class_t[" << num_classes << "] (structured classification results)"
-                  << std::endl;
+        std::cout << "Output tensor info: class_t[" << num_classes << "]" << std::endl;
 
         auto labels = generateDynamicLabels(num_classes);
 
@@ -159,9 +158,9 @@ void processClassificationResults(core::Tensor *output_tensor, int classificatio
             }
         }
 
-        std::cout << "\n🎯 Predicted class: " << labels[max_id] << " (confidence: " << std::fixed
-                  << std::setprecision(6) << max_confidence << ", id: " << max_id << ")" << std::endl;
-        std::cout << "--- End Results ---\n" << std::endl;
+        std::cout << "Predicted class: " << labels[max_id] << " (confidence: " << std::fixed << std::setprecision(6)
+                  << max_confidence << ", id: " << max_id << ")" << std::endl;
+        std::cout << "--- End Results ---" << std::endl;
         return;
     }
     if (output_tensor->dtype() == core::Tensor::Type::Float32)
@@ -194,9 +193,9 @@ void processClassificationResults(core::Tensor *output_tensor, int classificatio
             }
         }
 
-        std::cout << "\n🎯 Predicted class: " << labels[max_index] << " (score: " << std::fixed << std::setprecision(6)
+        std::cout << "Predicted class: " << labels[max_index] << " (score: " << std::fixed << std::setprecision(6)
                   << max_score << ")" << std::endl;
-        std::cout << "--- End Results ---\n" << std::endl;
+        std::cout << "--- End Results ---" << std::endl;
         return;
     }
     std::cout << "ERROR: Unsupported tensor type: " << static_cast<int>(output_tensor->dtype()) << std::endl;
@@ -283,7 +282,7 @@ void audioProcessingLoop(hal::Sensor *mic, std::shared_ptr<module::MDAG> dag)
         {
             classification_count++;
 
-            std::cout << "\n🔄 Processing classification #" << classification_count << std::endl;
+            std::cout << "Processing classification #" << classification_count << std::endl;
             std::cout << "Time: " << std::fixed << std::setprecision(1) << seconds << "s" << std::endl;
 
             auto process_start = std::chrono::steady_clock::now();
@@ -363,14 +362,14 @@ extern "C" void app_main()
         return;
     }
     core::ConfigMap dag_configs = { { "engine_id", 1 }, { "model_id", 1 }, { "graph_id", 0 } };
-    auto dag = createDAG("SoundClassificationDAG", dag_configs);
+    auto dag = createDAG("SoundClassification", dag_configs);
     if (!dag)
     {
         std::cout << "ERROR: DAG creation failed" << std::endl;
         return;
     }
 
-    std::cout << "\nPerforming initial DAG test..." << std::endl;
+    std::cout << "\n Performing initial DAG test..." << std::endl;
     auto test_start = std::chrono::steady_clock::now();
     auto status = dag->operator()();
     auto test_end = std::chrono::steady_clock::now();
@@ -404,15 +403,15 @@ extern "C" void app_main()
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 
-    std::cout << "\n✅ System initialization complete!" << std::endl;
-    std::cout << "📊 Performance summary:" << std::endl;
+    std::cout << "System initialization complete!" << std::endl;
+    std::cout << "Performance summary:" << std::endl;
     std::cout << "  - DAG execution time: ~" << test_time << "ms" << std::endl;
     std::cout << "  - Audio window: 1.0s (" << ANALYSIS_WINDOW_SAMPLES << " samples)" << std::endl;
     std::cout << "  - Processing stride: 0.5s (" << INFERENCE_STRIDE_SAMPLES << " samples)" << std::endl;
-    std::cout << "  - Real-time factor: "
-              << (test_time < 500 ? "✅ Real-time capable" : "⚠️ May struggle with real-time") << std::endl;
+    std::cout << "  - Real-time factor: " << (test_time < 500 ? "Real-time capable" : "May struggle with real-time")
+              << std::endl;
 
-    std::cout << "\n🚀 Starting main audio processing..." << std::endl;
+    std::cout << "\n Starting main audio processing..." << std::endl;
     audioProcessingLoop(mic, dag);
     std::cout << "Audio processing loop ended unexpectedly" << std::endl;
 }

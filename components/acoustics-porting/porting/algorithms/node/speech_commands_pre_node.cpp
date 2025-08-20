@@ -1,6 +1,6 @@
+#include "speech_commands_pre_node.hpp"
 #include "core/logger.hpp"
 #include "module/module_node.hpp"
-#include "node/esp_feature_extractor_node.hpp"
 
 namespace bridge {
 
@@ -8,16 +8,16 @@ void __REGISTER_EXTERNAL_MODULE_NODE_BUILDER__()
 {
     LOG(INFO, "Registering external module node builders");
 
-    auto status = module::MNodeBuilderRegistry::registerNodeBuilder("ESPFeatureExtractorNode",
-        porting::algorithms::node::createESPFeatureExtractorNode, false);
+    auto status = module::MNodeBuilderRegistry::registerNodeBuilder("SpeechCommandsPreprocess",
+        porting::algorithms::node::createSpeechCommandsPreprocess, false);
 
     if (!status)
     {
-        LOG(ERROR, "Failed to register ESPFeatureExtractorNode: %s", status.message().c_str());
+        LOG(ERROR, "Failed to register SpeechCommandsPreprocess: %s", status.message().c_str());
     }
     else
     {
-        LOG(INFO, "Successfully registered ESPFeatureExtractorNode");
+        LOG(INFO, "Successfully registered SpeechCommandsPreprocess");
     }
 
     const auto &node_map = module::MNodeBuilderRegistry::getNodeBuilderMap();
