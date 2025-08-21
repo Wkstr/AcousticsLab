@@ -1,3 +1,7 @@
+# ADPCM RS
+
+ADPCM RS is a Rust library for decoding ADPCM audio data, providing both a command-line interface (CLI) and WebAssembly (WASM) bindings for use in web applications and Python.
+
 ## Build CLI
 
 ```

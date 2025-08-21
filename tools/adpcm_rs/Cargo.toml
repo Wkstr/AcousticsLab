@@ -1,7 +1,7 @@
 [package]
 name = "adpcm_rs"
 version = "0.1.0"
-edition = "2025"
+edition = "2024"
 license = "Apache-2.0"
 description = "IMA ADPCM decoder matching AcousticsLab C++ encoder, with WASM and Python bindings"
 
