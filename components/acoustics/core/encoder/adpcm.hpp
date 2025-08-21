@@ -39,13 +39,17 @@ namespace encoder {
         {
         public:
             ADPCMIMA(void *buffer = nullptr, size_t buffer_size = 1024) noexcept
-                : Encoder((std::numeric_limits<int>::max() - 1) >> 1), _state(), _buffer(buffer),
-                  _buffer_size(buffer_size), _internal_buffer(false)
+                : Encoder(std::numeric_limits<size_t>::max() - 1), _state(), _buffer(buffer), _buffer_size(buffer_size),
+                  _internal_buffer(false)
             {
                 if (!_buffer && _buffer_size > 0)
                 {
-                    _buffer = new std::byte[_buffer_size];
+                    _buffer = new (std::nothrow) std::byte[_buffer_size];
                     _internal_buffer = true;
+                    if (!_buffer)
+                    {
+                        _error = ENOMEM;
+                    }
                 }
             }
 
@@ -63,24 +67,21 @@ namespace encoder {
                 return _state;
             }
 
-            int encode(const ValueType *data, size_t size, std::nullptr_t) noexcept
-            {
-                return static_cast<int>((size + 1) >> 1) << 1;
-            }
-
             template<typename T, std::enable_if_t<std::is_invocable_r_v<int, T, const void *, size_t>, bool> = true>
-            int encode(const ValueType *data, size_t size, T &&write_callback) noexcept
+            size_t encode(const ValueType *data, size_t size, T &&write_callback) noexcept
             {
                 if (!data || size == 0) [[unlikely]]
                 {
-                    return -EINVAL;
+                    _error = EINVAL;
+                    return 0;
                 }
                 if (!_buffer) [[unlikely]]
                 {
-                    return -ENOMEM;
+                    _error = ENOMEM;
+                    return 0;
                 }
 
-                size = ((size + 1) >> 1) << 1;
+                size = size - (size & 1);
 
                 size_t p = 0;
                 for (size_t i = 0; i < size; ++i)
@@ -122,40 +123,48 @@ namespace encoder {
                     {
                         predictor_diff = ~predictor_diff + 1;
                     }
-                    _state.predictor = std::clamp(_state.predictor + predictor_diff, -32768, 32767);
+                    _state.predictor = std::clamp(_state.predictor + predictor_diff,
+                        static_cast<int>(std::numeric_limits<ValueType>::min()),
+                        static_cast<int>(std::numeric_limits<ValueType>::max()));
                     _state.step_index = std::clamp(static_cast<int>(_state.step_index + _index_table[nibble]), 0,
                         static_cast<int>(_step_table.size() - 1));
 
                     if (i & 1)
                     {
-                        static_cast<std::byte *>(_buffer)[p++] |= static_cast<std::byte>(nibble);
+                        static_cast<std::byte *>(_buffer)[p] |= static_cast<std::byte>(nibble);
+                        if (++p >= _buffer_size) [[unlikely]]
+                        {
+                            int res = write_callback(_buffer, _buffer_size);
+                            if (res != 0) [[unlikely]]
+                            {
+                                _error = res;
+                                return 0;
+                            }
+                            p = 0;
+                        }
                     }
                     else
                     {
                         static_cast<std::byte *>(_buffer)[p] = static_cast<std::byte>(nibble << 4);
-                    }
-
-                    if (p >= _buffer_size) [[unlikely]]
-                    {
-                        int res = write_callback(_buffer, _buffer_size);
-                        if (res < 0) [[unlikely]]
-                        {
-                            return res;
-                        }
-                        p = 0;
                     }
                 }
 
                 if (p > 0)
                 {
                     int res = write_callback(_buffer, p);
-                    if (res < 0) [[unlikely]]
+                    if (res != 0) [[unlikely]]
                     {
-                        return res;
+                        _error = res;
+                        return 0;
                     }
                 }
 
                 return size;
+            }
+
+            size_t estimate(size_t size) const noexcept
+            {
+                return (size - (size & 1)) >> 1;
             }
 
         private:
