@@ -33,18 +33,23 @@ namespace encoder {
         {
         public:
             ASCIIBase64(void *buffer = nullptr, size_t buffer_size = 1024) noexcept
-                : Encoder((std::numeric_limits<int>::max() >> 2) * 3), _state(), _buffer(buffer),
+                : Encoder((std::numeric_limits<size_t>::max() >> 2) * 3), _state(), _buffer(buffer),
                   _buffer_size(buffer_size), _internal_buffer(false)
             {
                 if (!_buffer && _buffer_size >= 4)
                 {
-                    _buffer = new std::byte[_buffer_size];
+                    _buffer = new (std::nothrow) std::byte[_buffer_size];
                     _internal_buffer = true;
+                    if (!_buffer)
+                    {
+                        _error = ENOMEM;
+                    }
                 }
                 else if (_buffer_size < 4) [[unlikely]]
                 {
                     _buffer = nullptr;
                     _buffer_size = 0;
+                    _error = EINVAL;
                 }
             }
 
@@ -62,13 +67,8 @@ namespace encoder {
                 return _state;
             }
 
-            int encode(const ValueType *data, size_t size, std::nullptr_t) noexcept
-            {
-                return static_cast<int>((size + 2) / 3) << 2;
-            }
-
             template<typename T, std::enable_if_t<std::is_invocable_r_v<int, T, const void *, size_t>, bool> = true>
-            int encode(const ValueType *data, size_t size, T &&write_callback) noexcept
+            size_t encode(const ValueType *data, size_t size, T &&write_callback) noexcept
             {
                 if (!data || size == 0) [[unlikely]]
                 {
@@ -99,7 +99,8 @@ namespace encoder {
                         int res = write_callback(_buffer, _buffer_size);
                         if (res < 0) [[unlikely]]
                         {
-                            return res;
+                            _error = res;
+                            return 0;
                         }
                         p = 0;
                         next_p = 4;
@@ -126,7 +127,8 @@ namespace encoder {
                             int res = write_callback(_buffer, _buffer_size);
                             if (res < 0) [[unlikely]]
                             {
-                                return res;
+                                _error = res;
+                                return 0;
                             }
                             p = 0;
                             next_p = 4;
@@ -150,7 +152,8 @@ namespace encoder {
                             int res = write_callback(_buffer, _buffer_size);
                             if (res < 0) [[unlikely]]
                             {
-                                return res;
+                                _error = res;
+                                return 0;
                             }
                             p = 0;
                             next_p = 4;
@@ -169,11 +172,17 @@ namespace encoder {
                     int res = write_callback(_buffer, p);
                     if (res < 0) [[unlikely]]
                     {
-                        return res;
+                        _error = res;
+                        return 0;
                     }
                 }
 
-                return static_cast<int>(size);
+                return size;
+            }
+
+            size_t estimate(size_t size) noexcept
+            {
+                return ((size + 2) / 3) << 2;
             }
 
         private:
