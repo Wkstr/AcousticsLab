@@ -81,6 +81,58 @@ set(ACOUSTICS_PRIV_REQUIRES
     littlefs
 )
 
+if(NOT DEFINED ACOUSTICS_LIB_OPUS_ENABLE)
+    set(LIB_OPUS_ENABLE 0)
+    message(STATUS "OPUS support is disabled by default")
+else()
+    message(STATUS "OPUS support is set to: ${ACOUSTICS_LIB_OPUS_ENABLE}")
+    if(ACOUSTICS_LIB_OPUS_ENABLE STREQUAL "1" OR ACOUSTICS_LIB_OPUS_ENABLE STREQUAL "ON")
+        set(LIB_OPUS_DIR ${CMAKE_CURRENT_LIST_DIR}/../acoustics/3rdparty/opus)
+
+        set(LIB_OPUS_CELT_DIR ${LIB_OPUS_DIR}/celt)
+        file(GLOB LIB_OPUS_CELT_SRCS
+            ${LIB_OPUS_CELT_DIR}/*.c
+            ${LIB_OPUS_CELT_DIR}/*.h
+        )
+
+        set(LIB_OPUS_SILK_DIR ${LIB_OPUS_DIR}/silk)
+        file(GLOB LIB_OPUS_SILK_SRCS
+            ${LIB_OPUS_SILK_DIR}/*.c
+            ${LIB_OPUS_SILK_DIR}/*.h
+        )
+        set(LIB_OPUS_SILK_FIXED_DIR ${LIB_OPUS_DIR}/silk/fixed)
+        file(GLOB LIB_OPUS_SILK_FIXED_SRCS
+            ${LIB_OPUS_SILK_FIXED_DIR}/*.c
+            ${LIB_OPUS_SILK_FIXED_DIR}/*.h
+        )
+
+        set(LIB_OPUS_INCS ${LIB_OPUS_DIR}/include)
+        file(GLOB_RECURSE LIB_OPUS_SRCS
+            ${LIB_OPUS_DIR}/src/*.c
+            ${LIB_OPUS_DIR}/src/*.h
+        )
+
+        list(APPEND ACOUSTICS_PORTING_SRCS
+            ${LIB_OPUS_CELT_SRCS}
+            ${LIB_OPUS_SILK_SRCS}
+            ${LIB_OPUS_SILK_FIXED_SRCS}
+            ${LIB_OPUS_SRCS}
+        )
+        list(APPEND ACOUSTICS_PORTING_INCLUDES_DIR
+            ${LIB_OPUS_SILK_DIR}
+            ${LIB_OPUS_CELT_DIR}
+            ${LIB_OPUS_SILK_FIXED_DIR}
+            ${LIB_OPUS_INCS}
+        )
+
+        set(LIB_OPUS_ENABLE 1)
+        message(STATUS "OPUS support is enabled")
+    else()
+        set(LIB_OPUS_ENABLE 0)
+        message(STATUS "OPUS support is disabled")
+    endif()
+endif()
+
 if(NOT DEFINED ACOUSTICS_PORTING_LIB_TFLM_ENABLE)
     set(PORTING_LIB_TFLM_ENABLE 0)
     message(STATUS "TFLM support is disabled by default")
@@ -109,5 +161,16 @@ target_compile_definitions(${COMPONENT_LIB} PUBLIC
     CORE_VERSION_MAJOR=${ACOUSTICS_SDK_VERSION_MAJOR}
     CORE_VERSION_MINOR=${ACOUSTICS_SDK_VERSION_MINOR}
     CORE_VERSION_PATCH=${ACOUSTICS_SDK_VERSION_PATCH}
+    LIB_OPUS_ENABLE=${LIB_OPUS_ENABLE}
     PORTING_LIB_TFLM_ENABLE=${PORTING_LIB_TFLM_ENABLE}
 )
+
+if(LIB_OPUS_ENABLE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE
+        OPUS_BUILD=1
+        FLOAT_APPROX=1
+        NONTHREADSAFE_PSEUDOSTACK=1
+        FIXED_POINT=1
+    )
+    target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-maybe-uninitialized)
+endif()

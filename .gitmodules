@@ -1,0 +1,3 @@
+[submodule "components/acoustics/3rdparty/opus"]
+	path = components/acoustics/3rdparty/opus
+	url = https://github.com/xiph/opus
