@@ -72,11 +72,13 @@ namespace encoder {
             {
                 if (!data || size == 0) [[unlikely]]
                 {
-                    return -EINVAL;
+                    _error = EINVAL;
+                    return 0;
                 }
                 if (!_buffer) [[unlikely]]
                 {
-                    return -EFAULT;
+                    _error = EFAULT;
+                    return 0;
                 }
 
                 uint8_t bytes[4];
@@ -110,7 +112,20 @@ namespace encoder {
                     p = next_p;
                 }
 
-                switch (size - len)
+                const int remain = size - len;
+                size_t next_p = p + 4;
+                if (remain && next_p > _buffer_size)
+                {
+                    int res = write_callback(_buffer, _buffer_size);
+                    if (res < 0) [[unlikely]]
+                    {
+                        _error = res;
+                        return 0;
+                    }
+                    p = 0;
+                    next_p = 4;
+                }
+                switch (remain)
                 {
                     case 2: {
                         auto b0 = static_cast<uint8_t>(data[len]);
@@ -120,19 +135,6 @@ namespace encoder {
                         bytes[1] = _base64_chars[((b0 & 0x03) << 4) | (b1 >> 4)];
                         bytes[2] = _base64_chars[(b1 & 0x0F) << 2];
                         bytes[3] = '=';
-
-                        size_t next_p = p + 4;
-                        if (next_p > _buffer_size) [[unlikely]]
-                        {
-                            int res = write_callback(_buffer, _buffer_size);
-                            if (res < 0) [[unlikely]]
-                            {
-                                _error = res;
-                                return 0;
-                            }
-                            p = 0;
-                            next_p = 4;
-                        }
 
                         std::memcpy(static_cast<std::byte *>(_buffer) + p, bytes, 4);
                         p = next_p;
@@ -145,19 +147,6 @@ namespace encoder {
                         bytes[1] = _base64_chars[(b0 & 0x03) << 4];
                         bytes[2] = '=';
                         bytes[3] = '=';
-
-                        size_t next_p = p + 4;
-                        if (next_p > _buffer_size) [[unlikely]]
-                        {
-                            int res = write_callback(_buffer, _buffer_size);
-                            if (res < 0) [[unlikely]]
-                            {
-                                _error = res;
-                                return 0;
-                            }
-                            p = 0;
-                            next_p = 4;
-                        }
 
                         std::memcpy(static_cast<std::byte *>(_buffer) + p, bytes, 4);
                         p = next_p;
