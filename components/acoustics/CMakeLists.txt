@@ -73,6 +73,21 @@ if(NOT DEFINED ACOUSTICS_SDK_TARGET)
     message(FATAL_ERROR "ACOUSTICS_SDK_TARGET is not defined")
 endif()
 
+if(NOT DEFINED ACOUSTICS_LIB_OPUS_ENABLE)
+    set(LIB_OPUS_ENABLE 0)
+    message(STATUS "OPUS support is disabled by default")
+else()
+    message(STATUS "OPUS support is set to: ${ACOUSTICS_LIB_OPUS_ENABLE}")
+    if(ACOUSTICS_LIB_OPUS_ENABLE STREQUAL "1" OR ACOUSTICS_LIB_OPUS_ENABLE STREQUAL "ON")
+        add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/3rdparty/opus)
+        set(LIB_OPUS_ENABLE 1)
+        message(STATUS "OPUS support is enabled")
+    else()
+        set(LIB_OPUS_ENABLE 0)
+        message(STATUS "OPUS support is disabled")
+    endif()
+endif()
+
 if(${ACOUSTICS_SDK_TARGET} STREQUAL "POSIX")
     message(STATUS "Building for POSIX")
 
@@ -90,6 +105,10 @@ if(${ACOUSTICS_SDK_TARGET} STREQUAL "POSIX")
         CXX_STANDARD 20
         CXX_STANDARD_REQUIRED ON
     )
+
+    if(LIB_OPUS_ENABLE)
+        target_link_libraries(acoustics PRIVATE opus)
+    endif()
 endif()
 
 add_compile_options(-fdiagnostics-color=always -ffast-math -O2)
