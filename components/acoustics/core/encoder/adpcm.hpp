@@ -8,10 +8,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <new>
 #include <type_traits>
 
 #include "core/encoder.hpp"
+#include "core/logger.hpp"
 
 namespace core {
 
@@ -38,19 +40,32 @@ namespace encoder {
         class ADPCMIMA final: public Encoder<ADPCM, ADPCMIMA>
         {
         public:
-            ADPCMIMA(void *buffer = nullptr, size_t buffer_size = 1024) noexcept
-                : Encoder(std::numeric_limits<size_t>::max() - 1), _state(), _buffer(buffer), _buffer_size(buffer_size),
-                  _internal_buffer(false)
+            template<typename T = std::unique_ptr<Encoder<ADPCM, ADPCMIMA>>>
+            static ADPCMIMA create(void *buffer = nullptr, size_t buffer_size = 4096) noexcept
             {
-                if (!_buffer && _buffer_size > 0)
+                bool internal_buffer = false;
+                if (!buffer)
                 {
-                    _buffer = new (std::nothrow) std::byte[_buffer_size];
-                    _internal_buffer = true;
-                    if (!_buffer)
+                    buffer = new (std::nothrow) std::byte[buffer_size];
+                    internal_buffer = true;
+                    if (!buffer)
                     {
-                        _error = ENOMEM;
+                        LOG(ERROR, "Failed to allocate internal buffer, size: %zu", buffer_size);
+                        return {};
                     }
                 }
+
+                auto ptr = T { new (std::nothrow) ADPCMIMA(buffer, buffer_size, internal_buffer) };
+                if (!ptr)
+                {
+                    LOG(ERROR, "Failed to create ADPCMIMA encoder");
+                    if (internal_buffer)
+                    {
+                        delete[] static_cast<std::byte *>(buffer);
+                    }
+                    return {};
+                }
+                return *ptr;
             }
 
             ~ADPCMIMA() noexcept
@@ -168,10 +183,16 @@ namespace encoder {
             }
 
         private:
+            explicit ADPCMIMA(void *buffer, size_t buffer_size, bool internal_buffer) noexcept
+                : Encoder(std::numeric_limits<size_t>::max() - 1), _state(), _buffer(buffer), _buffer_size(buffer_size),
+                  _internal_buffer(internal_buffer)
+            {
+            }
+
             State _state;
             void *_buffer;
-            size_t _buffer_size;
-            bool _internal_buffer;
+            const size_t _buffer_size;
+            const bool _internal_buffer;
 
             static inline constexpr const std::array<int16_t, 89> _step_table
                 = { 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80,

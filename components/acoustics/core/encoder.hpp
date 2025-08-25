@@ -23,6 +23,7 @@ public:
     template<typename U, typename V, std::enable_if_t<std::is_same_v<U, typename T::ValueType>, bool> = true>
     size_t encode(const U *data, size_t size, V &&write_callback) noexcept
     {
+        _error = 0;
         if (size <= _safe_size) [[likely]]
         {
             return static_cast<P *>(this)->encode(data, size, std::forward<V>(write_callback));
