@@ -41,7 +41,7 @@ namespace encoder {
         {
         public:
             template<typename T = std::unique_ptr<Encoder<ADPCM, ADPCMIMA>>>
-            static ADPCMIMA create(void *buffer = nullptr, size_t buffer_size = 4096) noexcept
+            static T create(void *buffer = nullptr, size_t buffer_size = 4096) noexcept
             {
                 bool internal_buffer = false;
                 if (!buffer)
@@ -65,7 +65,7 @@ namespace encoder {
                     }
                     return {};
                 }
-                return *ptr;
+                return ptr;
             }
 
             ~ADPCMIMA() noexcept
