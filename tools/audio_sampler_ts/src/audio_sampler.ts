@@ -139,7 +139,7 @@ async function main() {
         const wasmState = new adpcm.WasmState();
         const parser = port.pipe(new ReadlineParser({ delimiter: '\n' }));
         parser.on('data', (line: string) => {
-            if (line.startsWith("SP: ")) {
+            if (line.startsWith("ADPCM: ")) {
                 decodeSoundPacket(line, writer, wasmState);
             } else {
                 process.stdout.write(line.replace(/[\r\n]+$/, '') + '\n');
