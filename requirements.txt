@@ -1,3 +1,5 @@
 gradio
 numpy
 pandas
+pyserial
+opuslib
