@@ -8,10 +8,12 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <new>
 #include <type_traits>
 
 #include "core/encoder.hpp"
+#include "core/logger.hpp"
 
 namespace core {
 
@@ -32,25 +34,38 @@ namespace encoder {
         class ASCIIBase64 final: public Encoder<ASCII, ASCIIBase64>
         {
         public:
-            ASCIIBase64(void *buffer = nullptr, size_t buffer_size = 1024) noexcept
-                : Encoder((std::numeric_limits<size_t>::max() >> 2) * 3), _state(), _buffer(buffer),
-                  _buffer_size(buffer_size), _internal_buffer(false)
+            template<typename T = std::unique_ptr<Encoder<ASCII, ASCIIBase64>>>
+            static T create(void *buffer = nullptr, size_t buffer_size = 4096) noexcept
             {
-                if (!_buffer && _buffer_size >= 4)
+                if (buffer_size < 4)
                 {
-                    _buffer = new (std::nothrow) std::byte[_buffer_size];
-                    _internal_buffer = true;
-                    if (!_buffer)
+                    LOG(ERROR, "Provided buffer size %zu is too small, need at least %d", buffer_size, 4);
+                    return {};
+                }
+
+                bool internal_buffer = false;
+                if (!buffer)
+                {
+                    buffer = new (std::nothrow) std::byte[buffer_size];
+                    internal_buffer = true;
+                    if (!buffer)
                     {
-                        _error = ENOMEM;
+                        LOG(ERROR, "Failed to allocate internal buffer, size: %zu", buffer_size);
+                        return {};
                     }
                 }
-                else if (_buffer_size < 4) [[unlikely]]
+
+                auto ptr = T { new (std::nothrow) ASCIIBase64(buffer, buffer_size, internal_buffer) };
+                if (!ptr)
                 {
-                    _buffer = nullptr;
-                    _buffer_size = 0;
-                    _error = EINVAL;
+                    LOG(ERROR, "Failed to allocate ASCIIBase64 instance");
+                    if (internal_buffer)
+                    {
+                        delete[] static_cast<std::byte *>(buffer);
+                    }
+                    return {};
                 }
+                return ptr;
             }
 
             ~ASCIIBase64() noexcept
@@ -175,10 +190,16 @@ namespace encoder {
             }
 
         private:
-            ASCII::State _state;
+            explicit ASCIIBase64(void *buffer, size_t buffer_size, bool internal_buffer) noexcept
+                : Encoder((std::numeric_limits<size_t>::max() >> 2) * 3), _state(), _buffer(buffer),
+                  _buffer_size(buffer_size), _internal_buffer(internal_buffer)
+            {
+            }
+
+            State _state;
             void *_buffer;
-            size_t _buffer_size;
-            bool _internal_buffer;
+            const size_t _buffer_size;
+            const bool _internal_buffer;
 
             constexpr static inline const std::array<char, 64> _base64_chars = { 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
                 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c',

@@ -99,6 +99,7 @@ if(${ACOUSTICS_SDK_TARGET} STREQUAL "POSIX")
 
     target_compile_definitions(acoustics PUBLIC
         ACOUSTICS_API_VERSION=${ACOUSTICS_API_VERSION}
+        LIB_OPUS_ENABLE=${LIB_OPUS_ENABLE}
     )
 
     set_target_properties(acoustics PROPERTIES
