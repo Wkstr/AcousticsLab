@@ -30,11 +30,34 @@ set(ACOUSTICS_INCLUDES_DIR
     ${CMAKE_CURRENT_LIST_DIR}/../acoustics/
 )
 
-file(GLOB_RECURSE ACOUSTICS_SRCS_API
+file(GLOB ACOUSTICS_SRCS_API
     ${CMAKE_CURRENT_LIST_DIR}/../acoustics/api/*.c
     ${CMAKE_CURRENT_LIST_DIR}/../acoustics/api/*.hpp
     ${CMAKE_CURRENT_LIST_DIR}/../acoustics/api/*.cpp
 )
+
+if(NOT DEFINED ACOUSTICS_API_VERSION)
+    message(WARNING "ACOUSTICS_API_VERSION is not defined, defaulting to 0")
+    set(ACOUSTICS_API_VERSION "0")
+endif()
+
+if(${ACOUSTICS_API_VERSION} STREQUAL "0")
+    file(GLOB_RECURSE ACOUSTICS_SRCS_API_V0
+        ${CMAKE_CURRENT_LIST_DIR}/../acoustics/api/v0/*.c
+        ${CMAKE_CURRENT_LIST_DIR}/../acoustics/api/v0/*.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/../acoustics/api/v0/*.cpp
+    )
+    list(APPEND ACOUSTICS_SRCS_API ${ACOUSTICS_SRCS_API_V0})
+    message(STATUS "Using API version 0 sources")
+elseif(${ACOUSTICS_API_VERSION} STREQUAL "1")
+    file(GLOB_RECURSE ACOUSTICS_SRCS_API_V1
+        ${CMAKE_CURRENT_LIST_DIR}/../acoustics/api/v1/*.c
+        ${CMAKE_CURRENT_LIST_DIR}/../acoustics/api/v1/*.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/../acoustics/api/v1/*.cpp
+    )
+    list(APPEND ACOUSTICS_SRCS_API ${ACOUSTICS_SRCS_API_V1})
+    message(STATUS "Using API version 1 sources")
+endif()
 
 file(GLOB_RECURSE ACOUSTICS_SRCS_CORE
     ${CMAKE_CURRENT_LIST_DIR}/../acoustics/core/*.c
