@@ -31,6 +31,14 @@ if(${ACOUSTICS_API_VERSION} STREQUAL "0")
     )
     list(APPEND ACOUSTICS_SRCS_API ${ACOUSTICS_SRCS_API_V0})
     message(STATUS "Using API version 0 sources")
+elseif(${ACOUSTICS_API_VERSION} STREQUAL "1")
+    file(GLOB_RECURSE ACOUSTICS_SRCS_API_V1
+        ${CMAKE_CURRENT_LIST_DIR}/api/v1/*.c
+        ${CMAKE_CURRENT_LIST_DIR}/api/v1/*.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/api/v1/*.cpp
+    )
+    list(APPEND ACOUSTICS_SRCS_API ${ACOUSTICS_SRCS_API_V1})
+    message(STATUS "Using API version 1 sources")
 endif()
 
 if(NOT DEFINED ACOUSTICS_SRCS_API)

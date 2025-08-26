@@ -1,130 +1,143 @@
+
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <freertos/timers.h>
 
-#include "engine/tflm.hpp"
-#include "hal/engine.hpp"
-#include "hal/sensor.hpp"
+#include <esp_task_wdt.h>
 
-#include <chrono>
-#include <iostream>
+#include "api/context.hpp"
+#include "api/executor.hpp"
+#include "api/server.hpp"
+
+#include "hal/transport.hpp"
+
+#if LOG_LEVEL >= LOG_LEVEL_DEBUG
+#include "core/debug.hpp"
+#endif
+
+#include <cstdio>
+
+#define EXECUTOR_TASK_BOUND          16
+#define EXECUTOR_TASK_STACK_SIZE     20480
+#define EXECUTOR_TASK_PRIORITY       3
+#define EXECUTOR_TASK_NAME           "Executor"
+#define EXECUTOR_TASK_TIMEOUT_MS     10000
+#define EXECUTOR_TASK_PIN_TO_CORE    1
+#define EXECUTOR_TASK_ROUND_DELAY_MS 1
+
+#define SERVER_COMMAND_BUFFER_SIZE 2048
+#define SERVER_TASK_ROUND_DELAY_MS 10
+
+static api::Context *context_instance = nullptr;
+static api::Executor *executor_instance = nullptr;
+
+static void executor_yield()
+{
+    int ret = esp_task_wdt_reset();
+    if (ret != ESP_OK) [[unlikely]]
+    {
+        LOG(ERROR, "Failed to reset task watchdog: %d", ret);
+    }
+    taskYIELD();
+    vTaskDelay(pdMS_TO_TICKS(EXECUTOR_TASK_ROUND_DELAY_MS));
+}
+
+static void executor_task(void *)
+{
+    if (!executor_instance) [[unlikely]]
+    {
+        LOG(ERROR, "Executor instance is null");
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    int ret = esp_task_wdt_add(nullptr);
+    if (ret != ESP_OK) [[unlikely]]
+    {
+        LOG(ERROR, "Failed to add task to watchdog: %d", ret);
+    }
+
+    static esp_task_wdt_config_t wdt_config = {
+        .timeout_ms = EXECUTOR_TASK_TIMEOUT_MS,
+        .idle_core_mask = 1 << EXECUTOR_TASK_PIN_TO_CORE,
+        .trigger_panic = false,
+    };
+    ret = esp_task_wdt_reconfigure(&wdt_config);
+    if (ret != ESP_OK) [[unlikely]]
+    {
+        LOG(WARNING, "Failed to reconfigure task watchdog: %d", ret);
+    }
+
+    executor_yield();
+
+    while (true)
+    {
+#if LOG_LEVEL >= LOG_LEVEL_DEBUG
+        static size_t counter = 0;
+        if (++counter % 1000 == 0)
+            core::printHeapInfo();
+#endif
+        const auto status = executor_instance->execute(executor_yield);
+        if (!status) [[unlikely]]
+        {
+            LOG(DEBUG, "Executor task stopped: %d, %s", status.code(), status.message().c_str());
+            if (context_instance) [[likely]]
+            {
+                context_instance->report(status);
+            }
+            continue;
+        }
+        executor_yield();
+    }
+
+    LOG(INFO, "Executor task exiting");
+    vTaskDelete(nullptr);
+}
 
 extern "C" void app_main()
 {
-    std::cout << "Starting..." << std::endl;
+    LOG(INFO, "Starting...");
 
-    bridge::__REGISTER_ENGINES__();
-    bridge::__REGISTER_SENSORS__();
-
-    auto engine = hal::EngineRegistry::getEngine(1);
-    if (!engine)
+    LOG(INFO, "Initializing API Context");
+    context_instance = api::Context::create();
+    if (!context_instance)
     {
-        std::cout << "Engine with ID 1 not found" << std::endl;
+        LOG(ERROR, "Failed to create API context");
         return;
     }
-    std::cout << "Engine found: " << engine->info().name << std::endl;
-
-    auto status = engine->init();
-    if (!status)
+    if (!context_instance->status())
     {
-        std::cout << "Failed to initialize engine: " << status.message() << std::endl;
+        LOG(ERROR, "API context initialization failed: %d, %s", context_instance->status().code(),
+            context_instance->status().message().c_str());
         return;
     }
-    std::cout << "Engine initialized successfully" << std::endl;
 
-    std::shared_ptr<core::Model> model;
-    auto info = engine->modelInfo([](const core::Model::Info &info) { return info.id == 1; });
-    status = engine->loadModel(info, model);
-    if (!status)
+    LOG(INFO, "Initializing Executor");
+    auto executor = api::Executor(EXECUTOR_TASK_BOUND);
+    executor_instance = &executor;
+    int ret = xTaskCreatePinnedToCore(executor_task, EXECUTOR_TASK_NAME, EXECUTOR_TASK_STACK_SIZE, nullptr,
+        EXECUTOR_TASK_PRIORITY, nullptr, EXECUTOR_TASK_PIN_TO_CORE);
+    if (ret != pdPASS)
     {
-        std::cout << "Failed to load model: " << status.message() << std::endl;
-        return;
+        LOG(ERROR, "Failed to create executor task: %d", ret);
     }
-    std::cout << "Model loaded successfully: " << model->info()->name << std::endl;
 
-    auto graph = model->graph(0);
-    if (!graph)
-    {
-        std::cout << "Failed to get graph from model" << std::endl;
-        return;
-    }
-    std::cout << "Graph loaded successfully: " << graph->name() << std::endl;
-
-    auto s = std::chrono::steady_clock::now();
-    status = graph->forward();
-    auto e = std::chrono::steady_clock::now();
-
-    if (!status)
-    {
-        std::cout << "Graph forward failed: " << status.message() << std::endl;
-        return;
-    }
-    std::cout << "Graph forward executed successfully in "
-              << std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count() << " ms" << std::endl;
-    for (size_t i = 0; i < 3; ++i)
-    {
-        auto s = std::chrono::steady_clock::now();
-        status = graph->forward();
-        auto e = std::chrono::steady_clock::now();
-
+    LOG(INFO, "Initializing API Server");
+    auto server = api::Server(*context_instance, executor, SERVER_COMMAND_BUFFER_SIZE);
+    auto stop_token = [](const core::Status &status) noexcept -> bool {
         if (!status)
         {
-            std::cout << "Graph forward " << i << " failed: " << status.message() << std::endl;
-            return;
+            LOG(DEBUG, "Server stop token triggered: %d, %s", status.code(), status.message().c_str());
         }
-        std::cout << "Graph forward " << i << " executed successfully in "
-                  << std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count() << " ms" << std::endl;
+        vTaskDelay(pdMS_TO_TICKS(SERVER_TASK_ROUND_DELAY_MS));
+        return false;
+    };
 
-        vTaskDelay(pdMS_TO_TICKS(5));
-    }
-
-    auto mic = hal::SensorRegistry::getSensor(2);
-    if (!mic)
-    {
-        std::cout << "Sensor with ID 2 not found" << std::endl;
-        return;
-    }
-    std::cout << "Sensor found: " << mic->info().name << std::endl;
-
-    status = mic->init();
-    if (!status)
-    {
-        std::cout << "Failed to initialize sensor: " << status.message() << std::endl;
-        return;
-    }
-    std::cout << "Sensor initialized successfully" << std::endl;
-
-    s = std::chrono::steady_clock::now();
+    LOG(INFO, "Waiting for commands...");
     while (1)
     {
-        auto duration_ms
-            = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - s).count();
-        float seconds = duration_ms / 1000.0f;
-        auto available = mic->dataAvailable();
-        std::cout << "Time since start: " << seconds << " seconds, data available: " << available << std::endl;
-        if (available)
-        {
-            auto rs = std::chrono::steady_clock::now();
-            auto data_frame = core::DataFrame<std::unique_ptr<core::Tensor>>();
-            status = mic->readDataFrame(data_frame, 44100 / 2);
-            auto re = std::chrono::steady_clock::now();
-            if (!status)
-            {
-                std::cout << "Failed to read data frame: " << status.message() << std::endl;
-            }
-            else
-            {
-                std::cout << "Data frame read successfully in "
-                          << std::chrono::duration_cast<std::chrono::milliseconds>(re - rs).count() << " ms, "
-                          << "data size: " << data_frame.data->size() << " bytes" << std::endl;
-            }
-        }
+        auto status = server.serve(stop_token);
+        LOG(WARNING, "Server stopped: %d, %s", status.code(), status.message().c_str());
 
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
-
-    while (1)
-    {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }

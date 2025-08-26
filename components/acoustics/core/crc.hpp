@@ -12,6 +12,8 @@ template<typename T, typename P>
 class CRC
 {
 public:
+    using ValueType = T;
+
     ~CRC() noexcept = default;
 
     void update(const uint8_t *data, size_t size) noexcept

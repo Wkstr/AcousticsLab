@@ -10,6 +10,7 @@ file(GLOB_RECURSE PROJ_SRCS
     ${CMAKE_CURRENT_LIST_DIR}/*.hpp
 )
 
+set(ACOUSTICS_API_VERSION "1" CACHE STRING "Acoustics API version")
 set(ACOUSTICS_PORTING_LIB_TFLM_ENABLE ON CACHE BOOL "Enable TFLM support in acoustics-porting")
 
 idf_component_register(
