@@ -79,7 +79,7 @@ static void executor_task(void *)
         const auto status = executor_instance->execute(executor_yield);
         if (!status) [[unlikely]]
         {
-            LOG(DEBUG, "Executor task stopped: %d, %s", status.code(), status.message().c_str());
+            LOG(DEBUG, "Executor task fail: %d, %s", status.code(), status.message().c_str());
             if (context_instance) [[likely]]
             {
                 context_instance->report(status);
