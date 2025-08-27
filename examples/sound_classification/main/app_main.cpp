@@ -17,7 +17,7 @@
 #include <cstdio>
 
 #define EXECUTOR_TASK_BOUND          16
-#define EXECUTOR_TASK_STACK_SIZE     20480
+#define EXECUTOR_TASK_STACK_SIZE     40960
 #define EXECUTOR_TASK_PRIORITY       3
 #define EXECUTOR_TASK_NAME           "Executor"
 #define EXECUTOR_TASK_TIMEOUT_MS     10000
@@ -79,7 +79,7 @@ static void executor_task(void *)
         const auto status = executor_instance->execute(executor_yield);
         if (!status) [[unlikely]]
         {
-            LOG(DEBUG, "Executor task stopped: %d, %s", status.code(), status.message().c_str());
+            LOG(DEBUG, "Executor task fail: %d, %s", status.code(), status.message().c_str());
             if (context_instance) [[likely]]
             {
                 context_instance->report(status);
@@ -91,6 +91,24 @@ static void executor_task(void *)
 
     LOG(INFO, "Executor task exiting");
     vTaskDelete(nullptr);
+}
+
+static void executor_pick()
+{
+    if (!executor_instance) [[unlikely]]
+    {
+        return;
+    }
+
+    const auto status = executor_instance->pick();
+    if (!status) [[unlikely]]
+    {
+        LOG(DEBUG, "Executor task fail: %d, %s", status.code(), status.message().c_str());
+        if (context_instance) [[likely]]
+        {
+            context_instance->report(status);
+        }
+    }
 }
 
 extern "C" void app_main()
@@ -128,6 +146,7 @@ extern "C" void app_main()
         {
             LOG(DEBUG, "Server stop token triggered: %d, %s", status.code(), status.message().c_str());
         }
+        executor_pick();
         vTaskDelay(pdMS_TO_TICKS(SERVER_TASK_ROUND_DELAY_MS));
         return false;
     };

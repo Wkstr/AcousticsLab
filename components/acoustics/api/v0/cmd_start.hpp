@@ -94,7 +94,7 @@ public:
                     std::chrono::steady_clock::now());
             }
 
-            size_t available = _sensor->dataAvailable();
+            const size_t available = _sensor->dataAvailable();
             if (available < 1)
             {
                 return executor.submit(getptr(), getNextDataDelay(available));
@@ -113,14 +113,15 @@ public:
                     return replyWithStatus(STATUS(EFAULT, "Data frame is null"), std::chrono::steady_clock::now());
                 }
                 const auto &shape = data_frame.data->shape();
-                available = shape[0];
-                if (available < 1 || data_frame.data->dtype() != core::Tensor::Type::Float32) [[unlikely]]
+                if (shape.size() != 2 || shape[0] < 1 || shape[1] != 3
+                    || data_frame.data->dtype() != core::Tensor::Type::Float32) [[unlikely]]
                 {
                     LOG(ERROR, "Data frame shape or type mismatch: shape=(%zu,%zu), dtype=%d", shape[0], shape[1],
                         static_cast<int>(data_frame.data->dtype()));
                     return replyWithStatus(STATUS(EINVAL, "Data frame shape or type mismatch"),
                         std::chrono::steady_clock::now());
                 }
+
                 const auto size = shape[0] * shape[1];
                 const auto axes = shape[1];
                 const auto buffer_axes = v0::shared::buffer.size();

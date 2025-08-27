@@ -3,6 +3,7 @@
 #include "cmd_break.hpp"
 #include "cmd_info.hpp"
 #include "cmd_rst.hpp"
+#include "cmd_start.hpp"
 #include "cmd_ver.hpp"
 
 #include "api/context.hpp"
@@ -42,6 +43,7 @@ static bool registerCommands()
     [[maybe_unused]] static auto rst_cmd = v1::CmdRst();
     [[maybe_unused]] static auto ver_cmd = v1::CmdVer();
     [[maybe_unused]] static auto info_cmd = v1::CmdInfo();
+    [[maybe_unused]] static auto start_cmd = v1::CmdStart();
 
     return true;
 }
