@@ -34,7 +34,7 @@ public:
             CONFIG_OBJECT_DECL_INTEGER("din_pin", "Data pin number", 41, 0, 48),
             CONFIG_OBJECT_DECL_INTEGER("sr", "PCM sample rate in Hz", 44100, 8000, 48000),
             CONFIG_OBJECT_DECL_INTEGER("channels", "Number of channels", 1, 1, 1),
-            CONFIG_OBJECT_DECL_INTEGER("buffered_duration", "Time duration of buffered data for DMA in seconds", 3, 1,
+            CONFIG_OBJECT_DECL_INTEGER("buffered_duration", "Time duration of buffered data for DMA in seconds", 2, 1,
                 5) };
     }
 
