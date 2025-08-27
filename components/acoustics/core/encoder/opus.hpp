@@ -30,9 +30,11 @@ namespace encoder {
 
         struct State final
         {
-            State() noexcept { }
+            State() noexcept : sample_rate(0) { }
 
             ~State() noexcept = default;
+
+            size_t sample_rate;
         };
     };
 
@@ -41,13 +43,13 @@ namespace encoder {
         class LIBOPUS final: public Encoder<OPUS, LIBOPUS>
         {
         public:
-            template<typename T = std::unique_ptr<Encoder<OPUS, LIBOPUS> > >
+            template<typename T = std::unique_ptr<LIBOPUS>>
             static T create(void *buffer = nullptr, size_t buffer_size = 4096, size_t sample_rate = 44100,
-                size_t channels = 1, int application = OPUS_APPLICATION_AUDIO, int bitrate = 256000, int complexity = 9,
-                int frame_ms = 100) noexcept
+                size_t channels = 1, int application = OPUS_APPLICATION_AUDIO, size_t bitrate = 256000,
+                int complexity = 9, size_t frame_ms = 100) noexcept
             {
-                int bytes_per_second = bitrate / 8;
-                int buffer_size_min = bytes_per_second * frame_ms / 1000;
+                size_t bytes_per_second = bitrate / 8;
+                size_t buffer_size_min = bytes_per_second * frame_ms / 1000;
                 size_t buffer_size_target = 0;
                 for (size_t i = 1; i < std::numeric_limits<int>::max() / 2; i <<= 1)
                 {
@@ -261,6 +263,24 @@ namespace encoder {
                 return encoded;
             }
 
+            static size_t estimate(size_t size, size_t sample_rate, size_t bitrate = 256000) noexcept
+            {
+                if (sample_rate == 0) [[unlikely]]
+                {
+                    return 0;
+                }
+                const size_t samples
+                    = static_cast<size_t>(std::ceil(static_cast<float>(size * (bitrate >> 3)) / sample_rate));
+                for (size_t i = 1; i < std::numeric_limits<int>::max(); i <<= 1)
+                {
+                    if (i >= samples)
+                    {
+                        return i;
+                    }
+                }
+                return std::numeric_limits<size_t>::max();
+            }
+
         private:
             explicit LIBOPUS(size_t frame_size, OpusEncoder *opus_encoder, void *resample_buffer,
                 size_t resample_buffer_size, size_t sample_rate, size_t sample_rate_encoder, void *buffer,
@@ -271,6 +291,7 @@ namespace encoder {
                   _sample_rate(sample_rate), _sample_rate_encoder(sample_rate_encoder), _buffer(buffer),
                   _buffer_size(buffer_size), _internal_buffer(internal_buffer)
             {
+                _state.sample_rate = sample_rate_encoder;
                 LOG(INFO,
                     "LIBOPUS initialized: frame_size=%zu, resample_frame_size=%zu, resample_buffer_size=%zu, "
                     "sample_rate=%zu, "
