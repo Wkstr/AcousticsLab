@@ -34,7 +34,7 @@ namespace encoder {
         class ASCIIBase64 final: public Encoder<ASCII, ASCIIBase64>
         {
         public:
-            template<typename T = std::unique_ptr<Encoder<ASCII, ASCIIBase64>>>
+            template<typename T = std::unique_ptr<ASCIIBase64>>
             static T create(void *buffer = nullptr, size_t buffer_size = 4096) noexcept
             {
                 if (buffer_size < 4)
@@ -184,7 +184,7 @@ namespace encoder {
                 return size;
             }
 
-            size_t estimate(size_t size) noexcept
+            static size_t estimate(size_t size) noexcept
             {
                 return ((size + 2) / 3) << 2;
             }

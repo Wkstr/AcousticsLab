@@ -32,11 +32,6 @@ public:
         return 0;
     }
 
-    size_t estimate(size_t size) const noexcept
-    {
-        return static_cast<const P *>(this)->estimate(size);
-    }
-
     int error() const noexcept
     {
         return _error;
