@@ -30,7 +30,7 @@ public:
 
         core::Status operator()(api::Executor &executor) override
         {
-            const auto removed = executor.clear();
+            const auto old_id = executor.clear();
 
             {
                 auto writer = v0::defaults::serializer->writer(v0::defaults::wait_callback,
@@ -45,9 +45,9 @@ public:
                 writer["msg"] += "";
                 {
                     auto data = writer["data"].writer<core::ObjectWriter>();
-                    data["removed"] += removed;
+                    data["oldId"] += old_id;
                     data["transport"] << _transport.info().name;
-                    data["transport_id"] += _transport.info().id;
+                    data["transportId"] += _transport.info().id;
                 }
             }
 
