@@ -1,6 +1,7 @@
 #include "common.hpp"
 
 #include "cmd_break.hpp"
+#include "cmd_cfgsc.hpp"
 #include "cmd_info.hpp"
 #include "cmd_rst.hpp"
 #include "cmd_start.hpp"
@@ -34,6 +35,9 @@ static bool initContext()
 
 static bool preInitHooks()
 {
+    v1::CmdCfgSC::preInitHook();
+    v1::CmdStart::preInitHook();
+
     return true;
 }
 
@@ -43,6 +47,7 @@ static bool registerCommands()
     [[maybe_unused]] static auto rst_cmd = v1::CmdRst();
     [[maybe_unused]] static auto ver_cmd = v1::CmdVer();
     [[maybe_unused]] static auto info_cmd = v1::CmdInfo();
+    [[maybe_unused]] static auto cfgsc_cmd = v1::CmdCfgSC();
     [[maybe_unused]] static auto start_cmd = v1::CmdStart();
 
     return true;

@@ -72,9 +72,9 @@ file(GLOB_RECURSE ACOUSTICS_SRCS_HAL
 )
 
 file(GLOB_RECURSE ACOUSTICS_SRCS_MODULE
-    ${CMAKE_CURRENT_LIST_DIR}/module/*.c
-    ${CMAKE_CURRENT_LIST_DIR}/module/*.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/module/*.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/module/*.c
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/module/*.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/module/*.cpp
 )
 message(STATUS "ACOUSTICS_SRCS_MODULE: ${ACOUSTICS_SRCS_MODULE}")
 

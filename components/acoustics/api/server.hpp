@@ -84,6 +84,7 @@ public:
             if (!status) [[unlikely]]
             {
                 LOG(ERROR, "RC failed on command '%s': %s", cmd.second->name().data(), status.message().c_str());
+                _context.report(status);
             }
         }
 

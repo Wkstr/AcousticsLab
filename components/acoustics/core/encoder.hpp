@@ -37,6 +37,12 @@ public:
         return _error;
     }
 
+    template<typename ...Args>
+    size_t estimate(Args &&...args) noexcept
+    {
+        return static_cast<P *>(this)->estimate(std::forward<Args>(args)...);
+    }
+
 protected:
     Encoder(size_t safe_size) noexcept : _safe_size(safe_size), _error(0) { }
 

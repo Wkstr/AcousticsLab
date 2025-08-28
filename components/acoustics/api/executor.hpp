@@ -143,7 +143,7 @@ public:
         if (task->id() != _id_counter.load()) [[unlikely]]
         {
             LOG(DEBUG, "Task cancelled or ID mismatch: Expected=%zu, Actual=%zu", _id_counter.load(), task->id());
-            return STATUS(ECANCELED, "Task ID mismatch");
+            return STATUS(ECANCELED, "Task cancelled or ID mismatch");
         }
 
         if (delay_ms > 0) [[unlikely]]
@@ -193,10 +193,15 @@ public:
 
         {
             std::lock_guard<std::mutex> lock(_mutex);
+            const auto task_id = _id_counter.load(std::memory_order_relaxed);
             {
                 std::lock_guard<std::mutex> lock(_delayed_tasks_mutex);
                 auto current_time = std::chrono::steady_clock::now();
                 std::erase_if(_delayed_tasks, [&](const DelayedTask &dt) {
+                    if (!dt.task || dt.task->id() != task_id) [[unlikely]]
+                    {
+                        return true;
+                    }
                     if (dt.isReady(current_time))
                     {
                         dt.task->setOverdue(dt.overdueMs(current_time));
@@ -206,47 +211,34 @@ public:
                     return false;
                 });
             }
-            if (_queue.empty()) [[unlikely]]
+
+            while (!_queue.empty())
             {
-                return STATUS_OK();
+                const auto &top = _queue.top();
+                if (!top || top->id() != task_id) [[unlikely]]
+                {
+                    _queue.pop();
+                    continue;
+                }
+                task = top;
+                _queue.pop();
+                break;
             }
-            task = std::move(_queue.top());
-            _queue.pop();
         }
 
-        const size_t task_id = task->id();
-        if (task_id != _id_counter.load()) [[unlikely]]
+        if (task) [[likely]]
         {
-            LOG(DEBUG, "Task cancelled or ID mismatch: Expected=%zu, Actual=%zu", _id_counter.load(), task_id);
-            return STATUS_OK();
+            LOG(VERBOSE, "Processing task: ID=%zu, Priority=%zu, Overdue=%zu", task->id(), task->priority(),
+                task->overdue());
+            return task->operator()(*this);
         }
-
-        LOG(VERBOSE, "Processing task: ID=%zu, Priority=%zu, Overdue=%zu", task_id, task->priority(), task->overdue());
-
-        return task->operator()(*this);
+        return STATUS_OK();
     }
 
     inline size_t clear() noexcept
     {
-        size_t cancelled_count = 0;
-        {
-            std::lock_guard<std::mutex> lock(_delayed_tasks_mutex);
-            cancelled_count += _delayed_tasks.size();
-            _delayed_tasks.clear();
-        }
-        {
-            std::lock_guard<std::mutex> lock(_mutex);
-            cancelled_count += _queue.size();
-            while (!_queue.empty())
-            {
-                _queue.pop();
-            }
-        }
-        _id_counter.fetch_add(1, std::memory_order_relaxed);
-
-        LOG(DEBUG, "Cancelled %zu tasks, current ID is now %zu", cancelled_count, _id_counter.load());
-
-        return cancelled_count;
+        std::lock_guard<std::mutex> lock(_mutex);
+        return _id_counter.fetch_add(1, std::memory_order_relaxed);
     }
 
 private:
