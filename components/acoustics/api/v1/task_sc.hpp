@@ -10,9 +10,17 @@
 #include "core/encoder/adpcm.hpp"
 #include "core/encoder/ascii.hpp"
 #include "core/encoder/opus.hpp"
+#include "core/model.hpp"
+#include "core/status.hpp"
+#include "core/tensor.hpp"
+#include "core/types.hpp"
 
 #include "hal/device.hpp"
+#include "hal/engine.hpp"
 #include "hal/sensor.hpp"
+
+#include "module/module_dag.hpp"
+#include "module/module_node.hpp"
 
 #include <algorithm>
 #include <array>
@@ -35,7 +43,7 @@ namespace shared {
     inline std::atomic<bool> is_sampling = false;
     inline std::atomic<bool> is_invoking = false;
 
-    inline constexpr const size_t buffer_size = 1024;
+    inline constexpr const size_t buffer_size = 102400;
     inline constexpr const size_t buffer_size_mask = buffer_size - 1;
     inline std::mutex buffer_mutex;
     inline size_t buffer_head = 0;
@@ -44,6 +52,7 @@ namespace shared {
     inline std::chrono::steady_clock::time_point buffer_base_ts = std::chrono::steady_clock::now();
 
     inline constexpr const size_t sample_chunk_ms = 100;
+    inline constexpr const size_t invoke_pull_ms = 20;
 
     inline constexpr const float overlap_ratio_min = 0.f;
     inline constexpr const float overlap_ratio_max = 0.6f;
@@ -53,66 +62,6 @@ namespace shared {
 
 struct TaskSC final
 {
-    class Storage final: public api::Task
-    {
-        static inline constexpr const char *sc_storage_path = CONTEXT_PREFIX CONTEXT_VERSION "/sc_storage";
-
-    public:
-        Storage(api::Context &context, hal::Transport &transport, size_t id, std::string tag) noexcept
-            : api::Task(context, transport, id, v1::defaults::task_priority), _tag(std::move(tag))
-        {
-        }
-
-        ~Storage() noexcept override { }
-
-        static inline void preInitHook()
-        {
-            auto device = hal::DeviceRegistry::getDevice();
-            if (!device || !device->initialized()) [[unlikely]]
-            {
-                LOG(ERROR, "Device not registered or not initialized");
-                return;
-            }
-
-            {
-                float overlap_ratio = shared::overlap_ratio.load();
-                size_t size = sizeof(overlap_ratio);
-                auto status
-                    = device->load(hal::Device::StorageType::Internal, getOverlapRatioPath(), &overlap_ratio, size);
-                if (!status || size != sizeof(overlap_ratio)) [[unlikely]]
-                {
-                    LOG(ERROR, "Failed to load overlap_ratio or size mismatch");
-                    return;
-                }
-                shared::overlap_ratio = std::clamp(overlap_ratio, shared::overlap_ratio_min, shared::overlap_ratio_max);
-            }
-        }
-
-        inline core::Status operator()(api::Executor &executor) override
-        {
-            auto device = hal::DeviceRegistry::getDevice();
-            if (!device || !device->initialized()) [[unlikely]]
-            {
-                LOG(ERROR, "Device not registered or not initialized");
-                return STATUS(ENODEV, "Device not registered or not initialized");
-            }
-
-            {
-                float overlap_ratio = shared::overlap_ratio.load();
-                return device->store(hal::Device::StorageType::Internal, getOverlapRatioPath(), &overlap_ratio,
-                    sizeof(overlap_ratio));
-            }
-        }
-
-    private:
-        static inline std::string getOverlapRatioPath()
-        {
-            return std::string(sc_storage_path) + "/overlap_ratio";
-        }
-
-        const std::string _tag;
-    };
-
     class Sample final: public api::Task
     {
     public:
@@ -120,12 +69,21 @@ struct TaskSC final
             const volatile size_t &external_task_id) noexcept
             : api::Task(context, transport, id, v1::defaults::task_priority), _sensor(sensor), _tag(std::move(tag)),
               _external_task_id(external_task_id), _internal_task_id(_external_task_id),
-              _start_time(std::chrono::steady_clock::now()), _current_id(0), _current_id_next(0), _sr(0), _fs(0),
-              _adpcm_encoder(), _opus_encoder(), _base64_encoder()
+              _start_time(std::chrono::steady_clock::now()), _current_id(0), _current_id_next(0), _sr(0), _fs(0)
         {
-            shared::is_sampling = true;
+            {
+                auto device = hal::DeviceRegistry::getDevice();
+                while (_external_task_id != _internal_task_id)
+                {
+                    bool expected = false;
+                    if (shared::is_sampling.compare_exchange_strong(expected, true))
+                        break;
+                    if (device)
+                        device->sleep(5);
+                }
+            }
 
-            if (!_sensor) [[likely]]
+            if (!_sensor) [[unlikely]]
             {
                 LOG(ERROR, "Sensor is null");
                 return;
@@ -143,6 +101,7 @@ struct TaskSC final
                     }
                     _sr = sr;
                     _fs = _sr * shared::sample_chunk_ms / 1000;
+                    LOG(INFO, "Sample rate: %d, Frame size: %zu", _sr, _fs);
                 }
             }
 
@@ -188,7 +147,7 @@ struct TaskSC final
             }
             if (!_sensor || !_sensor->initialized()) [[unlikely]]
             {
-                return replyWithStatus(STATUS(EINVAL, "Accelerometer sensor not initialized"),
+                return replyWithStatus(STATUS(EINVAL, "Microphone sensor not initialized"),
                     std::chrono::steady_clock::now());
             }
 
@@ -199,6 +158,7 @@ struct TaskSC final
             }
 
             auto status = STATUS_OK();
+            auto df_ts = std::chrono::steady_clock::now();
             void (*encoder_writer)(Sample &, core::ObjectWriter &) = nullptr;
             {
                 core::DataFrame<std::unique_ptr<core::Tensor>> data_frame;
@@ -222,6 +182,7 @@ struct TaskSC final
                         std::chrono::steady_clock::now());
                 }
 
+                df_ts = data_frame.timestamp;
                 const auto size = shape[0];
                 {
                     const std::lock_guard<std::mutex> lock(v1::shared::buffer_mutex);
@@ -238,7 +199,8 @@ struct TaskSC final
                             = data_frame.data->data<int16_t>()[i];
                     }
                 }
-                _current_id_next = _current_id + size;
+
+                _current_id_next = _current_id + 1;
                 if (shared::is_invoking)
                 {
                     status = encodeADPCM(data_frame.data->data<int16_t>(), size);
@@ -250,7 +212,8 @@ struct TaskSC final
                     encoder_writer = writeOPUS;
                 }
             }
-            status = replyWithStatus(status, std::chrono::steady_clock::now(), encoder_writer);
+
+            status = replyWithStatus(status, df_ts, encoder_writer);
             if (!status) [[unlikely]]
             {
                 return status;
@@ -287,7 +250,7 @@ struct TaskSC final
             return status;
         }
 
-        core::Status encodeADPCM(const int16_t *data, size_t size)
+        core::Status encodeADPCM(const int16_t *data, size_t size) noexcept
         {
             if (!_adpcm_encoder || !_base64_encoder) [[unlikely]]
             {
@@ -298,8 +261,6 @@ struct TaskSC final
             _adpcm_encoder->encode(data, size, [&](const void *encoded, size_t encoded_size) {
                 _base64_encoder->encode(static_cast<const uint8_t *>(encoded), encoded_size,
                     [&](const void *b64, size_t b64_size) {
-                        if (b64_size == 0) [[unlikely]]
-                            return EFAULT;
                         _b64_str = std::string_view(static_cast<const char *>(b64), b64_size);
                         return 0;
                     });
@@ -313,7 +274,7 @@ struct TaskSC final
             return STATUS_OK();
         }
 
-        static void writeADPCM(Sample &t, core::ObjectWriter &writer)
+        static void writeADPCM(Sample &t, core::ObjectWriter &writer) noexcept
         {
             writer["ch"] += 1;
             writer["sr"] += static_cast<int>(t._sr);
@@ -323,7 +284,7 @@ struct TaskSC final
             writer["adpcm"] << t._b64_str;
         }
 
-        core::Status encodeOPUS(const int16_t *data, size_t size)
+        core::Status encodeOPUS(const int16_t *data, size_t size) noexcept
         {
             if (!_opus_encoder || !_base64_encoder) [[unlikely]]
             {
@@ -334,8 +295,6 @@ struct TaskSC final
             _opus_encoder->encode(data, size, [&](const void *encoded, size_t encoded_size) {
                 _base64_encoder->encode(static_cast<const uint8_t *>(encoded), encoded_size,
                     [&](const void *b64, size_t b64_size) {
-                        if (b64_size == 0) [[unlikely]]
-                            return EFAULT;
                         _b64_str = std::string_view(static_cast<const char *>(b64), b64_size);
                         return 0;
                     });
@@ -349,7 +308,7 @@ struct TaskSC final
             return STATUS_OK();
         }
 
-        static void writeOPUS(Sample &t, core::ObjectWriter &writer)
+        static void writeOPUS(Sample &t, core::ObjectWriter &writer) noexcept
         {
             writer["ch"] += 1;
             writer["sr"] += static_cast<int>(t._opus_state.sample_rate);
@@ -376,13 +335,177 @@ struct TaskSC final
         size_t _sr;
         size_t _fs;
 
-        std::unique_ptr<core::EncoderADPCMIMA> _adpcm_encoder;
-        std::unique_ptr<core::EncoderLIBOPUS> _opus_encoder;
-        std::unique_ptr<core::EncoderASCIIBase64> _base64_encoder;
+        std::unique_ptr<core::EncoderADPCMIMA> _adpcm_encoder = nullptr;
+        std::unique_ptr<core::EncoderLIBOPUS> _opus_encoder = nullptr;
+        std::unique_ptr<core::EncoderASCIIBase64> _base64_encoder = nullptr;
 
-        core::EncoderADPCMIMA::State _adpcm_state;
-        core::EncoderLIBOPUS::State _opus_state;
-        std::string_view _b64_str;
+        core::EncoderADPCMIMA::State _adpcm_state = {};
+        core::EncoderLIBOPUS::State _opus_state = {};
+        std::string_view _b64_str = {};
+    };
+
+    class Invoke final: public api::Task
+    {
+    public:
+        Invoke(api::Context &context, hal::Transport &transport, size_t id, std::shared_ptr<module::MDAG> dag,
+            std::string tag, const volatile size_t &external_task_id) noexcept
+            : api::Task(context, transport, id, v1::defaults::task_priority), _dag(std::move(dag)),
+              _tag(std::move(tag)), _external_task_id(external_task_id), _internal_task_id(_external_task_id),
+              _start_time(std::chrono::steady_clock::now()), _current_id(0), _current_id_next(0)
+        {
+            {
+                auto device = hal::DeviceRegistry::getDevice();
+                while (_external_task_id != _internal_task_id)
+                {
+                    bool expected = false;
+                    if (shared::is_invoking.compare_exchange_strong(expected, true))
+                        break;
+                    if (device)
+                        device->sleep(5);
+                }
+            }
+
+            if (!_dag)
+            {
+                return;
+            }
+            {
+                auto p_inp_node = _dag->node("input");
+                if (!p_inp_node)
+                    return;
+                const auto &r_inp_mio = p_inp_node->input(0);
+                if (!r_inp_mio)
+                    return;
+                auto p_inp_tsr = r_inp_mio->operator()();
+                if (!p_inp_tsr || !p_inp_tsr->data() || p_inp_tsr->dtype() != core::Tensor::Type::Int16)
+                    return;
+                _input = p_inp_tsr;
+            }
+            {
+                auto p_out_node = _dag->node("output");
+                if (!p_out_node)
+                    return;
+                const auto &r_out_mio = p_out_node->output(0);
+                if (!r_out_mio)
+                    return;
+                auto p_out_tsr = r_out_mio->operator()();
+                if (!p_out_tsr || !p_out_tsr->data() || p_out_tsr->dtype() != core::Tensor::Type::Class)
+                    return;
+                _output = p_out_tsr;
+            }
+        }
+
+        ~Invoke() noexcept override
+        {
+            shared::is_invoking = false;
+        }
+
+        inline core::Status operator()(api::Executor &executor) override
+        {
+            shared::is_invoking = true;
+
+            if (_external_task_id != _internal_task_id) [[unlikely]]
+            {
+                return STATUS_OK();
+            }
+            if (!shared::is_sampling.load()) [[unlikely]]
+            {
+                return replyWithStatus(STATUS(EINVAL, "Sampling is not active"));
+            }
+            if (!_dag || !_input || !_output) [[unlikely]]
+            {
+                return replyWithStatus(STATUS(EFAULT, "DAG, input, or output is null"));
+            }
+
+            const auto &inp_shape = _input->shape();
+            if (inp_shape.size() != 2 || inp_shape[0] > shared::buffer_size || inp_shape[1] != 1)
+            {
+                return replyWithStatus(STATUS(EINVAL, "Invalid input tensor shape"));
+            }
+
+            const size_t required = inp_shape[0];
+            const size_t to_discard = static_cast<size_t>(std::round(required * (1.f - shared::overlap_ratio.load())));
+            size_t available = 0;
+            {
+                const std::lock_guard<std::mutex> lock(shared::buffer_mutex);
+                const auto head = shared::buffer_head;
+                const auto tail = shared::buffer_tail;
+                available = head - tail;
+                if (available < required) [[unlikely]]
+                {
+                    return executor.submit(getptr(), shared::invoke_pull_ms);
+                }
+                for (size_t i = 0; i < required; ++i)
+                {
+                    _input->data<int16_t>()[i] = shared::buffer[(tail + i) & shared::buffer_size_mask];
+                }
+                shared::buffer_tail = tail + std::min(to_discard, available);
+            }
+
+            const auto s = std::chrono::steady_clock::now();
+            auto status = _dag->operator()();
+            const auto e = std::chrono::steady_clock::now();
+            _perf_ms = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+            if (!status) [[unlikely]]
+            {
+                return replyWithStatus(status);
+            }
+
+            return executor.submit(getptr(), shared::invoke_pull_ms);
+        }
+
+    private:
+        core::Status replyWithStatus(core::Status status) noexcept
+        {
+            auto writer = v1::defaults::serializer->writer(v1::defaults::wait_callback,
+                std::bind(&v1::defaults::write_callback, std::ref(_transport), std::placeholders::_1,
+                    std::placeholders::_2),
+                std::bind(&v1::defaults::flush_callback, std::ref(_transport)));
+
+            writer["type"] += v1::ResponseType::Stream;
+            writer["name"] += "ClassifyResult";
+            writer["tag"] += _tag;
+            writer["code"] += status.code();
+            writer["msg"] << status.message();
+
+            {
+                auto data = writer["data"].writer<core::ObjectWriter>();
+                data["id"] += _current_id;
+                data["ts"] += std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - _start_time)
+                                  .count();
+                if (_output) [[likely]]
+                {
+                    auto cls_data = data["data"].writer<core::ArrayWriter>();
+                    const size_t size = _output->shape()[0];
+                    const auto classes = _output->data<core::class_t>();
+                    for (size_t i = 0; i < size; ++i)
+                    {
+                        auto cls = cls_data.writer<core::ArrayWriter>();
+                        const int id = classes[i].id;
+                        const float confidence = classes[i].confidence;
+                        cls += id;
+                        cls << confidence;
+                    }
+                }
+                data["perfMs"] += _perf_ms;
+            }
+
+            return status;
+        }
+
+        std::shared_ptr<module::MDAG> _dag;
+        const std::string _tag;
+        const volatile size_t &_external_task_id;
+        const size_t _internal_task_id;
+        const std::chrono::steady_clock::time_point _start_time;
+        size_t _current_id;
+        size_t _current_id_next;
+
+        core::Tensor *_input = nullptr;
+        core::Tensor *_output = nullptr;
+
+        size_t _perf_ms = 0;
     };
 };
 

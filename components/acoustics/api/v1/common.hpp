@@ -37,6 +37,7 @@ namespace defaults {
     inline constexpr const std::string_view at_version = "1.8.27";
     inline constexpr const std::string_view firmware_type = "sound_classification";
     inline constexpr const size_t task_priority = 5;
+    inline constexpr const int engine_id = 1;
     inline core::Serializer *serializer = nullptr;
 
     inline void wait_callback() noexcept
