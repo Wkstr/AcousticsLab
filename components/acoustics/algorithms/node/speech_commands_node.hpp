@@ -319,11 +319,10 @@ namespace algorithms { namespace node {
                         return STATUS(EFAULT, "Failed to get input data pointer");
                     }
 
+                    const float inv_scale = 1.0f / scale;
                     for (size_t i = 0; i < elements_to_copy; ++i)
                     {
-                        int32_t quantized_value = static_cast<int32_t>(std::round(input_data[i] / scale)) + zero_point;
-                        quantized_value = std::max(static_cast<int32_t>(-128),
-                            std::min(static_cast<int32_t>(127), quantized_value));
+                        int32_t quantized_value = static_cast<int32_t>((input_data[i] * inv_scale)) + zero_point;
                         model_data[i] = static_cast<int8_t>(quantized_value);
                     }
                     LOG(DEBUG, "Quantized and copied %zu float32 to int8 elements (scale=%.6f, zero_point=%ld)",

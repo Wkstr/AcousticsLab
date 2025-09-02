@@ -39,9 +39,6 @@ namespace algorithms { namespace dag {
         return core::Tensor::create<std::shared_ptr<core::Tensor>>(type, shape, data, total_bytes);
     }
 
-    static constexpr const char *FEATURE_EXTRACTOR_NODE_NAME = "SpeechCommandsPreprocess";
-    static constexpr const char *INFERENCE_NODE_NAME = "SpeechCommands";
-
     inline std::shared_ptr<module::MDAG> createSoundClassification(const core::ConfigMap &configs)
     {
         LOG(INFO, "Creating SoundClassification with dynamic tensor allocation");
@@ -68,49 +65,39 @@ namespace algorithms { namespace dag {
         auto feature_mio = std::make_shared<module::MIO>(feature_tensor, "feature_data");
         auto output_mio = std::make_shared<module::MIO>(output_tensor, "classification_output");
 
-        const auto &node_builders = module::MNodeBuilderRegistry::getNodeBuilderMap();
-
         module::MIOS input_ios = { input_mio };
-        auto input_builder_it = node_builders.find("input");
-        if (input_builder_it == node_builders.end())
+        auto input_node = module::MNodeBuilderRegistry::getNode("input", configs, &input_ios, &input_ios, 0);
+        if (!input_node)
         {
-            LOG(ERROR, "input builder not found in registry");
+            LOG(ERROR, "input node creation failed");
             return nullptr;
         }
-        auto input_node = input_builder_it->second(configs, &input_ios, &input_ios, 0);
 
         module::MIOS feature_inputs = { input_mio };
         module::MIOS feature_outputs = { feature_mio };
-        auto feature_builder_it = node_builders.find(FEATURE_EXTRACTOR_NODE_NAME);
-        if (feature_builder_it == node_builders.end())
+        auto feature_node = module::MNodeBuilderRegistry::getNode("SpeechCommandsPreprocess", configs, &feature_inputs,
+            &feature_outputs, 1);
+        if (!feature_node)
         {
-            LOG(ERROR, "SpeechCommandsPreprocess builder not found in registry");
+            LOG(ERROR, "SpeechCommandsPreprocess node creation failed");
             return nullptr;
         }
-        auto feature_node = feature_builder_it->second(configs, &feature_inputs, &feature_outputs, 1);
 
         module::MIOS inference_inputs = { feature_mio };
         module::MIOS inference_outputs = { output_mio };
-        auto inference_builder_it = node_builders.find(INFERENCE_NODE_NAME);
-        if (inference_builder_it == node_builders.end())
+        auto inference_node = module::MNodeBuilderRegistry::getNode("SpeechCommands", configs, &inference_inputs,
+            &inference_outputs, 2);
+        if (!inference_node)
         {
-            LOG(ERROR, "SpeechCommands builder not found in registry");
+            LOG(ERROR, "SpeechCommands node creation failed");
             return nullptr;
         }
-        auto inference_node = inference_builder_it->second(configs, &inference_inputs, &inference_outputs, 2);
 
         module::MIOS output_ios = { output_mio };
-        auto output_builder_it = node_builders.find("output");
-        if (output_builder_it == node_builders.end())
+        auto output_node = module::MNodeBuilderRegistry::getNode("output", configs, &output_ios, &output_ios, 3);
+        if (!output_node)
         {
-            LOG(ERROR, "output builder not found in registry");
-            return nullptr;
-        }
-        auto output_node = output_builder_it->second(configs, &output_ios, &output_ios, 3);
-
-        if (!input_node || !feature_node || !inference_node || !output_node)
-        {
-            LOG(ERROR, "Failed to create one or more DAG nodes");
+            LOG(ERROR, "output node creation failed");
             return nullptr;
         }
 

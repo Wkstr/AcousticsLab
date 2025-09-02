@@ -30,8 +30,8 @@ namespace porting { namespace algorithms { namespace node {
         inline SpeechCommandsPreprocess(const core::ConfigMap &configs, module::MIOS inputs, module::MIOS outputs,
             int priority)
             : module::MNode("SpeechCommandsPreprocess", std::move(inputs), std::move(outputs), priority),
-              _fft_handle(nullptr), _fft_input_buffer(nullptr), _log_features_buffer(nullptr),
-              _audio_float_buffer(nullptr), _blackman_window(nullptr), _initialized(false)
+              _fft_handle(nullptr), _fft_input_buffer(nullptr), _audio_float_buffer(nullptr), _blackman_window(nullptr),
+              _initialized(false)
         {
             LOG(DEBUG, "Creating SpeechCommandsPreprocess with priority %d", priority);
 
@@ -57,33 +57,15 @@ namespace porting { namespace algorithms { namespace node {
             return STATUS_OK();
         }
 
-        size_t getInputSampleCount() const noexcept
-        {
-            return AUDIO_SAMPLES;
-        }
-        size_t getOutputFeatureCount() const noexcept
-        {
-            return OUTPUT_SIZE;
-        }
-        core::Tensor::Type getInputDataType() const noexcept
-        {
-            return core::Tensor::Type::Int16;
-        }
-        core::Tensor::Type getOutputDataType() const noexcept
-        {
-            return core::Tensor::Type::Float32;
-        }
-
         inline core::Status initialize() noexcept
         {
             LOG(DEBUG, "Initializing SpeechCommandsPreprocess");
 
             _fft_input_buffer = allocateAligned<float>(FFT_SIZE);
-            _log_features_buffer = allocateAligned<float>(OUTPUT_SIZE);
             _audio_float_buffer = allocateAligned<float>(AUDIO_SAMPLES);
             _blackman_window = allocateAligned<float>(FRAME_LEN);
 
-            if (!_fft_input_buffer || !_log_features_buffer || !_audio_float_buffer || !_blackman_window)
+            if (!_fft_input_buffer || !_audio_float_buffer || !_blackman_window)
             {
                 LOG(ERROR, "Failed to allocate aligned buffers");
                 return STATUS(ENOMEM, "Buffer allocation failed");
@@ -130,30 +112,30 @@ namespace porting { namespace algorithms { namespace node {
                 return STATUS(EINVAL, "Input or output tensor is null");
             }
 
-            if (input_tensor->dtype() != getInputDataType())
+            if (input_tensor->dtype() != core::Tensor::Type::Int16)
             {
-                LOG(ERROR, "Input tensor data type mismatch: expected %d, got %d", static_cast<int>(getInputDataType()),
-                    static_cast<int>(input_tensor->dtype()));
+                LOG(ERROR, "Input tensor data type mismatch: expected %d, got %d",
+                    static_cast<int>(core::Tensor::Type::Int16), static_cast<int>(input_tensor->dtype()));
                 return STATUS(EINVAL, "Input tensor data type mismatch");
             }
 
-            if (static_cast<size_t>(input_tensor->shape().dot()) != getInputSampleCount())
+            if (static_cast<size_t>(input_tensor->shape().dot()) != AUDIO_SAMPLES)
             {
-                LOG(ERROR, "Input tensor size mismatch: expected %zu, got %d", getInputSampleCount(),
+                LOG(ERROR, "Input tensor size mismatch: expected %zu, got %d", AUDIO_SAMPLES,
                     input_tensor->shape().dot());
                 return STATUS(EINVAL, "Input tensor size mismatch");
             }
 
-            if (output_tensor->dtype() != getOutputDataType())
+            if (output_tensor->dtype() != core::Tensor::Type::Float32)
             {
                 LOG(ERROR, "Output tensor data type mismatch: expected %d, got %d",
-                    static_cast<int>(getOutputDataType()), static_cast<int>(output_tensor->dtype()));
+                    static_cast<int>(core::Tensor::Type::Float32), static_cast<int>(output_tensor->dtype()));
                 return STATUS(EINVAL, "Output tensor data type mismatch");
             }
 
-            if (static_cast<size_t>(output_tensor->shape().dot()) != getOutputFeatureCount())
+            if (static_cast<size_t>(output_tensor->shape().dot()) != OUTPUT_SIZE)
             {
-                LOG(ERROR, "Output tensor size mismatch: expected %zu, got %d", getOutputFeatureCount(),
+                LOG(ERROR, "Output tensor size mismatch: expected %zu, got %d", OUTPUT_SIZE,
                     output_tensor->shape().dot());
                 return STATUS(EINVAL, "Output tensor size mismatch");
             }
@@ -183,9 +165,14 @@ namespace porting { namespace algorithms { namespace node {
             {
                 prepareFrame(_audio_float_buffer.get(), frame_idx);
 
-                dl_rfft_f32_run(_fft_handle, _fft_input_buffer.get());
+                esp_err_t fft_result = dl_rfft_f32_run(_fft_handle, _fft_input_buffer.get());
+                if (fft_result != ESP_OK)
+                {
+                    LOG(ERROR, "ESP-DL RFFT execution failed with error: %d", fft_result);
+                    return STATUS(EFAULT, "ESP-DL RFFT execution failed");
+                }
 
-                float *current_log_features = _log_features_buffer.get() + (frame_idx * FEATURES_PER_FRAME);
+                float *current_log_features = output_features + (frame_idx * FEATURES_PER_FRAME);
                 for (size_t j = 0; j < FEATURES_PER_FRAME; ++j)
                 {
                     float real = _fft_input_buffer[j * 2 + 0];
@@ -196,9 +183,7 @@ namespace porting { namespace algorithms { namespace node {
                 }
             }
 
-            normalizeGlobally(_log_features_buffer.get(), OUTPUT_SIZE);
-
-            std::memcpy(output_features, _log_features_buffer.get(), OUTPUT_SIZE * sizeof(float));
+            normalizeGlobally(output_features, OUTPUT_SIZE);
 
             LOG(DEBUG, "Feature generation completed, output size: %zu", OUTPUT_SIZE);
             return STATUS_OK();
@@ -208,7 +193,6 @@ namespace porting { namespace algorithms { namespace node {
         dl_fft_f32_t *_fft_handle;
 
         std::shared_ptr<float[]> _fft_input_buffer;
-        std::shared_ptr<float[]> _log_features_buffer;
         std::shared_ptr<float[]> _audio_float_buffer;
         std::shared_ptr<float[]> _blackman_window;
 
