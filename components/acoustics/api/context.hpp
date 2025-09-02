@@ -10,6 +10,9 @@
 #include "core/logger.hpp"
 #include "core/status.hpp"
 
+#include "module/module_dag.hpp"
+#include "module/module_node.hpp"
+
 #include <mutex>
 #include <string_view>
 
@@ -109,6 +112,12 @@ private:
             }
             console_ptr = transport;
         }
+
+        bridge::__REGISTER_PREDEFINED_MODULE_NODE_BUILDER__();
+        bridge::__REGISTER_INTERNAL_MODULE_NODE_BUILDER__();
+        bridge::__REGISTER_EXTERNAL_MODULE_NODE_BUILDER__();
+
+        bridge::__REGISTER_MODULE_DAG_BUILDER__();
 
         return status;
     }

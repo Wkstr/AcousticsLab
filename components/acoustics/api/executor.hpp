@@ -31,9 +31,17 @@ public:
     {
         inline bool operator()(const std::shared_ptr<Task> &lhs, const std::shared_ptr<Task> &rhs) const noexcept
         {
-            const auto lhs_priority = lhs ? lhs->priority() : 0;
-            const auto rhs_priority = rhs ? rhs->priority() : 0;
-            return lhs_priority < rhs_priority;
+            if (!lhs || !rhs) [[unlikely]]
+            {
+                return !lhs && rhs;
+            }
+
+            if (lhs->priority() == rhs->priority())
+            {
+                return lhs->overdue() < rhs->overdue();
+            }
+
+            return lhs->priority() < rhs->priority();
         }
     };
 
@@ -61,9 +69,21 @@ public:
 
 protected:
     Task(Context &context, hal::Transport &transport, size_t id, size_t priority) noexcept
-        : _context(context), _transport(transport), _id(id), _priority(priority)
+        : _context(context), _transport(transport), _id(id), _priority(priority), _overdue(0)
     {
         LOG(DEBUG, "Task created: ID=%zu, Priority=%zu", _id, _priority);
+    }
+
+    friend Executor;
+
+    size_t overdue() const noexcept
+    {
+        return _overdue;
+    }
+
+    void setOverdue(size_t overdue) noexcept
+    {
+        _overdue = overdue;
     }
 
     Context &_context;
@@ -72,6 +92,7 @@ protected:
 private:
     const size_t _id;
     size_t _priority;
+    size_t _overdue;
 };
 
 class Executor final
@@ -84,12 +105,20 @@ public:
     struct DelayedTask final
     {
         mutable TaskPtr task;
-        std::chrono::steady_clock::time_point spawn_time;
-        size_t delay_ms;
+        std::chrono::steady_clock::time_point ready_time;
 
-        inline bool isReady(std::chrono::steady_clock::time_point current_time) const noexcept
+        inline bool isReady(const std::chrono::steady_clock::time_point &current_time) const noexcept
         {
-            return std::chrono::duration_cast<std::chrono::milliseconds>(current_time - spawn_time).count() >= delay_ms;
+            return current_time >= ready_time;
+        }
+
+        inline size_t overdueMs(const std::chrono::steady_clock::time_point &current_time) const noexcept
+        {
+            if (current_time > ready_time) [[likely]]
+            {
+                return std::chrono::duration_cast<std::chrono::milliseconds>(current_time - ready_time).count();
+            }
+            return 0;
         }
     };
 
@@ -114,17 +143,18 @@ public:
         if (task->id() != _id_counter.load()) [[unlikely]]
         {
             LOG(DEBUG, "Task cancelled or ID mismatch: Expected=%zu, Actual=%zu", _id_counter.load(), task->id());
-            return STATUS(ECANCELED, "Task ID mismatch");
+            return STATUS(ECANCELED, "Task cancelled or ID mismatch");
         }
 
         if (delay_ms > 0) [[unlikely]]
         {
+            auto ready = std::chrono::steady_clock::now() + std::chrono::milliseconds(delay_ms);
             std::lock_guard<std::mutex> lock(_delayed_tasks_mutex);
             if (_delayed_tasks.size() >= _bound) [[unlikely]]
             {
                 return STATUS(ENOSPC, "Executor delayed task queue is full");
             }
-            _delayed_tasks.emplace_back(DelayedTask { task, std::chrono::steady_clock::now(), delay_ms });
+            _delayed_tasks.emplace_back(DelayedTask { task, std::move(ready) });
         }
         else [[likely]]
         {
@@ -145,43 +175,9 @@ public:
     {
         while (true)
         {
-            TaskPtr task;
-
-            {
-                std::lock_guard<std::mutex> lock(_mutex);
-                {
-                    std::lock_guard<std::mutex> lock(_delayed_tasks_mutex);
-                    std::chrono::steady_clock::time_point current_time = std::chrono::steady_clock::now();
-                    std::erase_if(_delayed_tasks, [&](const DelayedTask &dt) {
-                        if (dt.isReady(current_time))
-                        {
-                            _queue.emplace(std::move(dt.task));
-                            return true;
-                        }
-                        return false;
-                    });
-                }
-                if (_queue.empty()) [[unlikely]]
-                {
-                    return STATUS_OK();
-                }
-                task = std::move(_queue.top());
-                _queue.pop();
-            }
-
-            const size_t task_id = task->id();
-            if (task_id != _id_counter.load()) [[unlikely]]
-            {
-                LOG(DEBUG, "Task cancelled or ID mismatch: Expected=%zu, Actual=%zu", _id_counter.load(), task_id);
-                continue;
-            }
-
-            LOG(VERBOSE, "Processing task: ID=%zu, Priority=%zu", task_id, task->priority());
-
-            const auto status = task->operator()(*this);
+            const auto status = pick();
             if (!status) [[unlikely]]
             {
-                LOG(ERROR, "Task execution failed: %d, %s", status.code(), status.message().c_str());
                 return status;
             }
             if (yield_callback)
@@ -191,27 +187,58 @@ public:
         }
     }
 
-    inline size_t clear() noexcept
+    inline core::Status pick() noexcept
     {
-        size_t cancelled_count = 0;
-        _id_counter.fetch_add(1, std::memory_order_relaxed);
-        {
-            std::lock_guard<std::mutex> lock(_delayed_tasks_mutex);
-            cancelled_count += _delayed_tasks.size();
-            _delayed_tasks.clear();
-        }
+        TaskPtr task;
+
         {
             std::lock_guard<std::mutex> lock(_mutex);
-            cancelled_count += _queue.size();
+            const auto task_id = _id_counter.load(std::memory_order_relaxed);
+            {
+                std::lock_guard<std::mutex> lock(_delayed_tasks_mutex);
+                auto current_time = std::chrono::steady_clock::now();
+                std::erase_if(_delayed_tasks, [&](const DelayedTask &dt) {
+                    if (!dt.task || dt.task->id() != task_id) [[unlikely]]
+                    {
+                        return true;
+                    }
+                    if (dt.isReady(current_time))
+                    {
+                        dt.task->setOverdue(dt.overdueMs(current_time));
+                        _queue.push(std::move(dt.task));
+                        return true;
+                    }
+                    return false;
+                });
+            }
+
             while (!_queue.empty())
             {
+                const auto &top = _queue.top();
+                if (!top || top->id() != task_id) [[unlikely]]
+                {
+                    _queue.pop();
+                    continue;
+                }
+                task = top;
                 _queue.pop();
+                break;
             }
         }
 
-        LOG(DEBUG, "Cancelled %zu tasks, current ID is now %zu", cancelled_count, _id_counter.load());
+        if (task) [[likely]]
+        {
+            LOG(VERBOSE, "Processing task: ID=%zu, Priority=%zu, Overdue=%zu", task->id(), task->priority(),
+                task->overdue());
+            return task->operator()(*this);
+        }
+        return STATUS_OK();
+    }
 
-        return cancelled_count;
+    inline size_t clear() noexcept
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        return _id_counter.fetch_add(1, std::memory_order_relaxed);
     }
 
 private:

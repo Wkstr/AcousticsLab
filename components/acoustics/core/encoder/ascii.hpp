@@ -8,10 +8,12 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <new>
 #include <type_traits>
 
 #include "core/encoder.hpp"
+#include "core/logger.hpp"
 
 namespace core {
 
@@ -32,20 +34,38 @@ namespace encoder {
         class ASCIIBase64 final: public Encoder<ASCII, ASCIIBase64>
         {
         public:
-            ASCIIBase64(void *buffer = nullptr, size_t buffer_size = 1024) noexcept
-                : Encoder((std::numeric_limits<int>::max() >> 2) * 3), _state(), _buffer(buffer),
-                  _buffer_size(buffer_size), _internal_buffer(false)
+            template<typename T = std::unique_ptr<ASCIIBase64>>
+            static T create(void *buffer = nullptr, size_t buffer_size = 4096) noexcept
             {
-                if (!_buffer && _buffer_size >= 4)
+                if (buffer_size < 4)
                 {
-                    _buffer = new std::byte[_buffer_size];
-                    _internal_buffer = true;
+                    LOG(ERROR, "Provided buffer size %zu is too small, need at least %d", buffer_size, 4);
+                    return {};
                 }
-                else if (_buffer_size < 4) [[unlikely]]
+
+                bool internal_buffer = false;
+                if (!buffer)
                 {
-                    _buffer = nullptr;
-                    _buffer_size = 0;
+                    buffer = new (std::nothrow) std::byte[buffer_size];
+                    internal_buffer = true;
+                    if (!buffer)
+                    {
+                        LOG(ERROR, "Failed to allocate internal buffer, size: %zu", buffer_size);
+                        return {};
+                    }
                 }
+
+                auto ptr = T { new (std::nothrow) ASCIIBase64(buffer, buffer_size, internal_buffer) };
+                if (!ptr)
+                {
+                    LOG(ERROR, "Failed to allocate ASCIIBase64 instance");
+                    if (internal_buffer)
+                    {
+                        delete[] static_cast<std::byte *>(buffer);
+                    }
+                    return {};
+                }
+                return ptr;
             }
 
             ~ASCIIBase64() noexcept
@@ -62,21 +82,18 @@ namespace encoder {
                 return _state;
             }
 
-            int encode(const ValueType *data, size_t size, std::nullptr_t) noexcept
-            {
-                return static_cast<int>((size + 2) / 3) << 2;
-            }
-
             template<typename T, std::enable_if_t<std::is_invocable_r_v<int, T, const void *, size_t>, bool> = true>
-            int encode(const ValueType *data, size_t size, T &&write_callback) noexcept
+            size_t encode(const ValueType *data, size_t size, T &&write_callback) noexcept
             {
                 if (!data || size == 0) [[unlikely]]
                 {
-                    return -EINVAL;
+                    _error = EINVAL;
+                    return 0;
                 }
                 if (!_buffer) [[unlikely]]
                 {
-                    return -EFAULT;
+                    _error = EFAULT;
+                    return 0;
                 }
 
                 uint8_t bytes[4];
@@ -99,7 +116,8 @@ namespace encoder {
                         int res = write_callback(_buffer, _buffer_size);
                         if (res < 0) [[unlikely]]
                         {
-                            return res;
+                            _error = res;
+                            return 0;
                         }
                         p = 0;
                         next_p = 4;
@@ -109,7 +127,20 @@ namespace encoder {
                     p = next_p;
                 }
 
-                switch (size - len)
+                const int remain = size - len;
+                size_t next_p = p + 4;
+                if (remain && next_p > _buffer_size)
+                {
+                    int res = write_callback(_buffer, _buffer_size);
+                    if (res < 0) [[unlikely]]
+                    {
+                        _error = res;
+                        return 0;
+                    }
+                    p = 0;
+                    next_p = 4;
+                }
+                switch (remain)
                 {
                     case 2: {
                         auto b0 = static_cast<uint8_t>(data[len]);
@@ -119,18 +150,6 @@ namespace encoder {
                         bytes[1] = _base64_chars[((b0 & 0x03) << 4) | (b1 >> 4)];
                         bytes[2] = _base64_chars[(b1 & 0x0F) << 2];
                         bytes[3] = '=';
-
-                        size_t next_p = p + 4;
-                        if (next_p > _buffer_size) [[unlikely]]
-                        {
-                            int res = write_callback(_buffer, _buffer_size);
-                            if (res < 0) [[unlikely]]
-                            {
-                                return res;
-                            }
-                            p = 0;
-                            next_p = 4;
-                        }
 
                         std::memcpy(static_cast<std::byte *>(_buffer) + p, bytes, 4);
                         p = next_p;
@@ -143,18 +162,6 @@ namespace encoder {
                         bytes[1] = _base64_chars[(b0 & 0x03) << 4];
                         bytes[2] = '=';
                         bytes[3] = '=';
-
-                        size_t next_p = p + 4;
-                        if (next_p > _buffer_size) [[unlikely]]
-                        {
-                            int res = write_callback(_buffer, _buffer_size);
-                            if (res < 0) [[unlikely]]
-                            {
-                                return res;
-                            }
-                            p = 0;
-                            next_p = 4;
-                        }
 
                         std::memcpy(static_cast<std::byte *>(_buffer) + p, bytes, 4);
                         p = next_p;
@@ -169,18 +176,30 @@ namespace encoder {
                     int res = write_callback(_buffer, p);
                     if (res < 0) [[unlikely]]
                     {
-                        return res;
+                        _error = res;
+                        return 0;
                     }
                 }
 
-                return static_cast<int>(size);
+                return size;
+            }
+
+            static size_t estimate(size_t size) noexcept
+            {
+                return ((size + 2) / 3) << 2;
             }
 
         private:
-            ASCII::State _state;
+            explicit ASCIIBase64(void *buffer, size_t buffer_size, bool internal_buffer) noexcept
+                : Encoder((std::numeric_limits<size_t>::max() >> 2) * 3), _state(), _buffer(buffer),
+                  _buffer_size(buffer_size), _internal_buffer(internal_buffer)
+            {
+            }
+
+            State _state;
             void *_buffer;
-            size_t _buffer_size;
-            bool _internal_buffer;
+            const size_t _buffer_size;
+            const bool _internal_buffer;
 
             constexpr static inline const std::array<char, 64> _base64_chars = { 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
                 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c',

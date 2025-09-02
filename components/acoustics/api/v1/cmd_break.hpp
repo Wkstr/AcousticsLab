@@ -9,7 +9,7 @@
 
 #include "hal/device.hpp"
 
-namespace v0 {
+namespace v1 {
 
 class CmdBreak final: public api::Command
 {
@@ -22,7 +22,7 @@ public:
     {
     public:
         Task(api::Context &context, hal::Transport &transport, size_t id, const std::string &tag) noexcept
-            : api::Task(context, transport, id, v0::defaults::task_priority + 1), _tag(tag)
+            : api::Task(context, transport, id, v1::defaults::task_priority + 1), _tag(tag)
         {
         }
 
@@ -33,12 +33,12 @@ public:
             const auto old_id = executor.clear();
 
             {
-                auto writer = v0::defaults::serializer->writer(v0::defaults::wait_callback,
-                    std::bind(&v0::defaults::write_callback, std::ref(_transport), std::placeholders::_1,
+                auto writer = v1::defaults::serializer->writer(v1::defaults::wait_callback,
+                    std::bind(&v1::defaults::write_callback, std::ref(_transport), std::placeholders::_1,
                         std::placeholders::_2),
-                    std::bind(&v0::defaults::flush_callback, std::ref(_transport)));
+                    std::bind(&v1::defaults::flush_callback, std::ref(_transport)));
 
-                writer["type"] += v0::ResponseType::Direct;
+                writer["type"] += v1::ResponseType::Direct;
                 writer["name"] += "BREAK";
                 writer["tag"] << _tag;
                 writer["code"] += 0;
@@ -72,6 +72,6 @@ public:
     }
 };
 
-} // namespace v0
+} // namespace v1
 
 #endif

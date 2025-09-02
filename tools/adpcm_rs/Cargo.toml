@@ -1,0 +1,29 @@
+[package]
+name = "adpcm_rs"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "IMA ADPCM decoder matching AcousticsLab C++ encoder, with WASM and Python bindings"
+
+[lib]
+name = "adpcm_rs"
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "adpcm_rs_cli"
+path = "src/main.rs"
+
+[features]
+default = []
+python = ["pyo3/extension-module"]
+wasm = ["wasm-bindgen"]
+
+[dependencies]
+cfg-if = "1"
+
+# Optional bindings
+wasm-bindgen = { version = "0.2", optional = true }
+pyo3 = { version = "0.25", features = ["abi3-py38"], optional = true }
+
+[dev-dependencies]
+rstest = "0.26"

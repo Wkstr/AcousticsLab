@@ -32,7 +32,7 @@ public:
     MDAGBuilderRegistry() = default;
     ~MDAGBuilderRegistry() = default;
 
-    inline static std::shared_ptr<MDAG> getDAG(std::string_view name, const core::ConfigMap &configs) noexcept
+    inline static std::shared_ptr<MDAG> getDAG(std::string_view name, const core::ConfigMap &configs = {}) noexcept
     {
         auto it = _dags.find(name);
         if (it != _dags.end()) [[likely]]
@@ -224,7 +224,7 @@ private:
 
 namespace bridge {
 
-extern void __REGISTER_MODULE_DAG_BUILDER__();
+void __REGISTER_MODULE_DAG_BUILDER__();
 
 } // namespace bridge
 

@@ -30,3 +30,9 @@ core::Status MDAGBuilderRegistry::registerDAGBuilder(std::string_view name, DAGB
 MDAGBuilderRegistry::DAGBuilderMap MDAGBuilderRegistry::_dags;
 
 } // namespace module
+
+namespace bridge {
+
+__attribute__((weak)) void __REGISTER_MODULE_DAG_BUILDER__() { }
+
+} // namespace bridge

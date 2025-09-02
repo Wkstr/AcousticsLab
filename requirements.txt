@@ -1,6 +1,8 @@
 gradio
 numpy
 pandas
+pyserial
+opuslib
 tensorflow
 tensorflowjs
 librosa
