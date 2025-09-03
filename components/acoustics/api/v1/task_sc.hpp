@@ -198,6 +198,7 @@ struct TaskSC final
                         v1::shared::buffer[(head + i) & v1::shared::buffer_size_mask]
                             = data_frame.data->data<int16_t>()[i];
                     }
+                    v1::shared::buffer_head = next_head;
                 }
 
                 _current_id_next = _current_id + 1;
@@ -441,6 +442,7 @@ struct TaskSC final
                 }
                 shared::buffer_tail = tail + std::min(to_discard, available);
             }
+            _current_id_next = _current_id + 1;
 
             const auto s = std::chrono::steady_clock::now();
             auto status = _dag->operator()();
@@ -449,6 +451,12 @@ struct TaskSC final
             if (!status) [[unlikely]]
             {
                 return replyWithStatus(status);
+            }
+
+            status = replyWithStatus(status);
+            if (!status) [[unlikely]]
+            {
+                return status;
             }
 
             return executor.submit(getptr(), shared::invoke_pull_ms);
