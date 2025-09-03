@@ -198,6 +198,7 @@ struct TaskSC final
                         v1::shared::buffer[(head + i) & v1::shared::buffer_size_mask]
                             = data_frame.data->data<int16_t>()[i];
                     }
+                    v1::shared::buffer_head = next_head;
                 }
 
                 _current_id_next = _current_id + 1;
@@ -418,7 +419,7 @@ struct TaskSC final
             }
 
             const auto &inp_shape = _input->shape();
-            if (inp_shape.size() != 2 || inp_shape[0] > shared::buffer_size || inp_shape[1] != 1)
+            if (inp_shape.size() != 1 || inp_shape[0] > shared::buffer_size)
             {
                 return replyWithStatus(STATUS(EINVAL, "Invalid input tensor shape"));
             }
@@ -435,6 +436,7 @@ struct TaskSC final
                 {
                     return executor.submit(getptr(), shared::invoke_pull_ms);
                 }
+                _current_id_next = _current_id + 1;
                 for (size_t i = 0; i < required; ++i)
                 {
                     _input->data<int16_t>()[i] = shared::buffer[(tail + i) & shared::buffer_size_mask];
@@ -449,6 +451,12 @@ struct TaskSC final
             if (!status) [[unlikely]]
             {
                 return replyWithStatus(status);
+            }
+
+            status = replyWithStatus(status);
+            if (!status) [[unlikely]]
+            {
+                return status;
             }
 
             return executor.submit(getptr(), shared::invoke_pull_ms);
@@ -477,7 +485,8 @@ struct TaskSC final
                 if (_output) [[likely]]
                 {
                     auto cls_data = data["data"].writer<core::ArrayWriter>();
-                    const size_t size = _output->shape()[0];
+                    const auto &shape = _output->shape();
+                    const size_t size = (shape.size() == 2) ? shape[1] : shape[0];
                     const auto classes = _output->data<core::class_t>();
                     for (size_t i = 0; i < size; ++i)
                     {
@@ -490,7 +499,7 @@ struct TaskSC final
                 }
                 data["perfMs"] += _perf_ms;
             }
-
+            _current_id = _current_id_next;
             return status;
         }
 
