@@ -15,9 +15,7 @@
 #endif
 
 #include <cstdio>
-namespace bridge {
-extern void __REGISTER_EXTERNAL_MODULE_NODE_BUILDER__();
-}
+
 #define EXECUTOR_TASK_BOUND          16
 #define EXECUTOR_TASK_STACK_SIZE     40960
 #define EXECUTOR_TASK_PRIORITY       3
@@ -116,7 +114,7 @@ static void executor_pick()
 extern "C" void app_main()
 {
     LOG(INFO, "Starting...");
-    bridge::__REGISTER_EXTERNAL_MODULE_NODE_BUILDER__();
+
     LOG(INFO, "Initializing API Context");
     context_instance = api::Context::create();
     if (!context_instance)

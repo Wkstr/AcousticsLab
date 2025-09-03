@@ -46,6 +46,4 @@ void __REGISTER_PREDEFINED_MODULE_NODE_BUILDER__()
 
 __attribute__((weak)) void __REGISTER_INTERNAL_MODULE_NODE_BUILDER__() { }
 
-__attribute__((weak)) void __REGISTER_EXTERNAL_MODULE_NODE_BUILDER__() { }
-
 } // namespace bridge
