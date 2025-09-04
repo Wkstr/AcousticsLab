@@ -1,0 +1,15 @@
+#pragma once
+#ifndef MODULE_BUILDER_HPP
+#define MODULE_BUILDER_HPP
+
+namespace bridge {
+
+void __REGISTER_PREDEFINED_MODULE_NODE_BUILDER__();
+void __REGISTER_INTERNAL_MODULE_NODE_BUILDER__();
+void __REGISTER_EXTERNAL_MODULE_NODE_BUILDER__();
+
+void __REGISTER_MODULE_DAG_BUILDER__();
+
+} // namespace bridge
+
+#endif // MODULE_BUILDER_HPP
