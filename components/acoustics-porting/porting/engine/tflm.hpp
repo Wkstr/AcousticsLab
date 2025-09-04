@@ -175,6 +175,12 @@ public:
             return STATUS(ENXIO, "Engine is not initialized or in an invalid state");
         }
 
+        if (_loaded_model_info && *_loaded_model_info == *info)
+        {
+            model = _loaded_model;
+            return STATUS_OK();
+        }
+
         if (_interpreter) [[unlikely]]
         {
             LOG(ERROR, "This engine does not support loading multiple models at once");
@@ -246,6 +252,9 @@ private:
         {
             return STATUS_OK();
         }
+
+        _loaded_model.reset();
+        _loaded_model_info.reset();
 
         for (const auto &model_info: _model_infos)
         {
@@ -462,7 +471,14 @@ private:
 
                 return STATUS_OK();
             });
-        model = std::make_shared<core::Model>(info, std::move(graph));
+        _loaded_model = std::make_shared<core::Model>(info, std::move(graph));
+        if (!_loaded_model) [[unlikely]]
+        {
+            LOG(ERROR, "Failed to create loaded model");
+            return STATUS(EFAULT, "Failed to create loaded model");
+        }
+        _loaded_model_info = info;
+        model = _loaded_model;
 
         return STATUS_OK();
     }
@@ -480,6 +496,9 @@ private:
     static constexpr inline const size_t _ops_count = TFLM_OPS_COUNT(TFLM_OPS_REQUIRED);
     std::unique_ptr<tflite::MicroMutableOpResolver<_ops_count>> _op_resolver;
     std::unique_ptr<tflite::MicroInterpreter> _interpreter;
+
+    std::shared_ptr<core::Model> _loaded_model;
+    std::shared_ptr<core::Model::Info> _loaded_model_info;
 };
 
 } // namespace porting
