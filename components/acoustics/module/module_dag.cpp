@@ -1,4 +1,5 @@
 #include "module_dag.hpp"
+#include "module_builder.hpp"
 
 namespace module {
 
