@@ -443,6 +443,7 @@ struct TaskSC final
                 }
                 shared::buffer_tail = tail + std::min(to_discard, available);
             }
+            _current_id_next = _current_id + 1;
 
             const auto s = std::chrono::steady_clock::now();
             auto status = _dag->operator()();

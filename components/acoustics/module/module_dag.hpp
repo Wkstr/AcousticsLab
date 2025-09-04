@@ -222,10 +222,4 @@ private:
 
 } // namespace module
 
-namespace bridge {
-
-void __REGISTER_MODULE_DAG_BUILDER__();
-
-} // namespace bridge
-
 #endif

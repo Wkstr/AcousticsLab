@@ -45,6 +45,11 @@ public:
 
         ~Info() = default;
 
+        bool operator==(const Info &other) const noexcept
+        {
+            return location == other.location;
+        }
+
         const int id;
         const std::string name;
         const Type type;

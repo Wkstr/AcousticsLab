@@ -1,4 +1,5 @@
 #include "module_node.hpp"
+#include "module_builder.hpp"
 
 #include "node/node_input.hpp"
 #include "node/node_output.hpp"

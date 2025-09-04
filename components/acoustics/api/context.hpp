@@ -10,6 +10,7 @@
 #include "core/logger.hpp"
 #include "core/status.hpp"
 
+#include "module/module_builder.hpp"
 #include "module/module_dag.hpp"
 #include "module/module_node.hpp"
 
