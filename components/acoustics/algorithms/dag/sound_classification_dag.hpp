@@ -2,6 +2,7 @@
 #ifndef SOUND_CLASSIFICATION_DAG_HPP
 #define SOUND_CLASSIFICATION_DAG_HPP
 
+#include "algorithms/node/speech_commands_node.hpp"
 #include "core/config_object.hpp"
 #include "core/logger.hpp"
 #include "core/status.hpp"
@@ -11,59 +12,54 @@
 #include "module/node/node_input.hpp"
 #include "module/node/node_output.hpp"
 
-#include <esp_heap_caps.h>
 #include <memory>
+#include <new>
 
 namespace algorithms { namespace dag {
-    template<typename T>
-    inline std::shared_ptr<core::Tensor> allocateAlignedTensor(const core::Tensor::Shape &shape,
-        core::Tensor::Type type)
-    {
-        int total_elements = shape.dot();
-        size_t total_bytes = static_cast<size_t>(total_elements) * sizeof(T);
-
-        void *raw_data = heap_caps_aligned_alloc(16, total_bytes, MALLOC_CAP_SPIRAM);
-        if (!raw_data)
-        {
-            LOG(ERROR, "Failed to allocate %zu bytes of aligned memory", total_bytes);
-            return nullptr;
-        }
-
-        std::shared_ptr<std::byte[]> data(reinterpret_cast<std::byte *>(raw_data), [](std::byte *ptr) {
-            if (ptr)
-            {
-                heap_caps_free(ptr);
-            }
-        });
-
-        return core::Tensor::create<std::shared_ptr<core::Tensor>>(type, shape, data, total_bytes);
-    }
 
     inline std::shared_ptr<module::MDAG> createSoundClassification(const core::ConfigMap &configs)
     {
-        LOG(INFO, "Creating SoundClassification with dynamic tensor allocation");
         auto dag = std::make_shared<module::MDAG>("SoundClassification");
 
         constexpr int AUDIO_SAMPLES = 44032;
         constexpr int FEATURE_COUNT = 9976;
-        constexpr int DEFAULT_OUTPUT_CLASSES = 20;
 
-        auto input_tensor
-            = allocateAlignedTensor<int16_t>(core::Tensor::Shape(AUDIO_SAMPLES), core::Tensor::Type::Int16);
-        auto feature_tensor
-            = allocateAlignedTensor<float>(core::Tensor::Shape(FEATURE_COUNT), core::Tensor::Type::Float32);
-        auto output_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Class,
-            core::Tensor::Shape(1, DEFAULT_OUTPUT_CLASSES));
+        auto input_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Int16,
+            core::Tensor::Shape(AUDIO_SAMPLES));
+        auto feature_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Float32,
+            core::Tensor::Shape(FEATURE_COUNT));
 
-        if (!input_tensor || !feature_tensor || !output_tensor)
+        if (!input_tensor || !feature_tensor)
         {
-            LOG(ERROR, "Failed to create tensors");
+            LOG(ERROR, "Failed to create input or feature tensors");
             return nullptr;
         }
 
         auto input_mio = std::make_shared<module::MIO>(input_tensor, "audio_input");
         auto feature_mio = std::make_shared<module::MIO>(feature_tensor, "feature_data");
+
+        constexpr int DEFAULT_OUTPUT_CLASSES = 20;
+        auto output_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Class,
+            core::Tensor::Shape(1, DEFAULT_OUTPUT_CLASSES));
+        if (!output_tensor)
+        {
+            LOG(ERROR, "Failed to create output tensor");
+            return nullptr;
+        }
         auto output_mio = std::make_shared<module::MIO>(output_tensor, "classification_output");
+
+        module::MIOS inference_inputs = { feature_mio };
+        module::MIOS inference_outputs = { output_mio };
+        auto inference_node = module::MNodeBuilderRegistry::getNode("SpeechCommands", configs, &inference_inputs,
+            &inference_outputs, 2);
+        if (!inference_node)
+        {
+            LOG(ERROR, "SpeechCommands node creation failed");
+            return nullptr;
+        }
+
+        auto speech_commands_node = std::static_pointer_cast<algorithms::node::SpeechCommands>(inference_node);
+        speech_commands_node->getModelOutputClasses();
 
         module::MIOS input_ios = { input_mio };
         auto input_node = module::MNodeBuilderRegistry::getNode("input", configs, &input_ios, &input_ios, 0);
@@ -80,16 +76,6 @@ namespace algorithms { namespace dag {
         if (!feature_node)
         {
             LOG(ERROR, "SpeechCommandsPreprocess node creation failed");
-            return nullptr;
-        }
-
-        module::MIOS inference_inputs = { feature_mio };
-        module::MIOS inference_outputs = { output_mio };
-        auto inference_node = module::MNodeBuilderRegistry::getNode("SpeechCommands", configs, &inference_inputs,
-            &inference_outputs, 2);
-        if (!inference_node)
-        {
-            LOG(ERROR, "SpeechCommands node creation failed");
             return nullptr;
         }
 
@@ -114,7 +100,6 @@ namespace algorithms { namespace dag {
             return nullptr;
         }
 
-        LOG(INFO, "SoundClassification created successfully with default output shape (1, %d)", DEFAULT_OUTPUT_CLASSES);
         return dag;
     }
 

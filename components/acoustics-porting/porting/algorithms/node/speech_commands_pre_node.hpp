@@ -8,7 +8,7 @@
 #include "core/tensor.hpp"
 #include "module/module_node.hpp"
 
-#include "dl_rfft.h"
+#include <dl_rfft.h>
 #include <esp_heap_caps.h>
 
 #include <cstdint>
@@ -27,72 +27,39 @@ namespace porting { namespace algorithms { namespace node {
         static constexpr size_t FEATURES_PER_FRAME = 232;
         static constexpr size_t OUTPUT_SIZE = NUM_FRAMES * FEATURES_PER_FRAME;
 
-        inline SpeechCommandsPreprocess(const core::ConfigMap &configs, module::MIOS inputs, module::MIOS outputs,
-            int priority)
-            : module::MNode("SpeechCommandsPreprocess", std::move(inputs), std::move(outputs), priority),
-              _fft_handle(nullptr), _fft_input_buffer(nullptr), _audio_float_buffer(nullptr), _blackman_window(nullptr),
-              _initialized(false)
+        static std::shared_ptr<module::MNode> create(const core::ConfigMap &configs, module::MIOS *inputs,
+            module::MIOS *outputs, int priority)
         {
-            LOG(DEBUG, "Creating SpeechCommandsPreprocess with priority %d", priority);
+            module::MIOS input_mios = inputs ? *inputs : module::MIOS {};
+            module::MIOS output_mios = outputs ? *outputs : module::MIOS {};
 
-            LOG(INFO, "SpeechCommandsPreprocess configured: input_samples=%zu, output_features=%zu", AUDIO_SAMPLES,
-                OUTPUT_SIZE);
-        }
-
-        inline ~SpeechCommandsPreprocess() override
-        {
-            LOG(DEBUG, "Destroying SpeechCommandsPreprocess");
-
-            if (_fft_handle)
+            auto validate_status = validateTensors(input_mios, output_mios);
+            if (!validate_status)
             {
-                dl_rfft_f32_deinit(_fft_handle);
-                _fft_handle = nullptr;
-            }
-        }
-
-        inline core::Status config(const core::ConfigMap &configs) noexcept override
-        {
-            LOG(DEBUG, "Reconfiguring SpeechCommandsPreprocess");
-
-            return STATUS_OK();
-        }
-
-        inline core::Status initialize() noexcept
-        {
-            LOG(DEBUG, "Initializing SpeechCommandsPreprocess");
-
-            _fft_input_buffer = allocateAligned<float>(FFT_SIZE);
-            _audio_float_buffer = allocateAligned<float>(AUDIO_SAMPLES);
-            _blackman_window = allocateAligned<float>(FRAME_LEN);
-
-            if (!_fft_input_buffer || !_audio_float_buffer || !_blackman_window)
-            {
-                LOG(ERROR, "Failed to allocate aligned buffers");
-                return STATUS(ENOMEM, "Buffer allocation failed");
+                LOG(ERROR, "SpeechCommandsPreprocess tensor validation failed: %s", validate_status.message().c_str());
+                return nullptr;
             }
 
-            _fft_handle = dl_rfft_f32_init(FFT_SIZE, MALLOC_CAP_SPIRAM);
-            if (!_fft_handle)
+            auto node = std::shared_ptr<SpeechCommandsPreprocess>(
+                new SpeechCommandsPreprocess(configs, std::move(input_mios), std::move(output_mios), priority));
+
+            if (!node)
             {
-                LOG(ERROR, "ESP-DL RFFT initialization failed");
-                return STATUS(EFAULT, "ESP-DL RFFT initialization failed");
+                LOG(ERROR, "Failed to create SpeechCommandsPreprocess instance");
+                return nullptr;
             }
 
-            LOG(DEBUG, "Initializing Blackman window with %zu coefficients", FRAME_LEN);
-            for (size_t n = 0; n < FRAME_LEN; ++n)
+            auto init_status = node->initialize();
+            if (!init_status)
             {
-                float n_norm = static_cast<float>(n) / static_cast<float>(FRAME_LEN);
-                _blackman_window[n] = 0.42f - 0.5f * std::cos(2.0f * std::numbers::pi_v<float> * n_norm)
-                                      + 0.08f * std::cos(4.0f * std::numbers::pi_v<float> * n_norm);
+                LOG(ERROR, "Failed to initialize SpeechCommandsPreprocess: %s", init_status.message().c_str());
+                return nullptr;
             }
-            LOG(DEBUG, "Blackman window initialized successfully");
 
-            _initialized = true;
-            LOG(INFO, "SpeechCommandsPreprocess initialized successfully");
-            return STATUS_OK();
+            return node;
         }
 
-        inline core::Status validateTensors(const module::MIOS &inputs, const module::MIOS &outputs) const noexcept
+        static core::Status validateTensors(const module::MIOS &inputs, const module::MIOS &outputs) noexcept
         {
             if (inputs.size() != 1)
             {
@@ -143,6 +110,76 @@ namespace porting { namespace algorithms { namespace node {
             return STATUS_OK();
         }
 
+    private:
+        inline SpeechCommandsPreprocess(const core::ConfigMap &configs, module::MIOS inputs, module::MIOS outputs,
+            int priority)
+            : module::MNode("SpeechCommandsPreprocess", std::move(inputs), std::move(outputs), priority),
+              _fft_handle(nullptr), _fft_input_buffer(nullptr), _audio_float_buffer(nullptr), _blackman_window(nullptr)
+        {
+        }
+
+    public:
+        inline ~SpeechCommandsPreprocess() override
+        {
+            if (_fft_handle)
+            {
+                dl_rfft_f32_deinit(_fft_handle);
+                _fft_handle = nullptr;
+            }
+        }
+
+    private:
+        inline core::Status initialize() noexcept
+        {
+            void *fft_ptr = heap_caps_aligned_alloc(16, FFT_SIZE * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (!fft_ptr)
+            {
+                return STATUS(ENOMEM, "Failed to allocate FFT input buffer");
+            }
+            _fft_input_buffer = std::shared_ptr<float[]>(static_cast<float *>(fft_ptr), [](float *p) {
+                if (p)
+                    heap_caps_free(p);
+            });
+
+            void *audio_ptr
+                = heap_caps_aligned_alloc(16, AUDIO_SAMPLES * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (!audio_ptr)
+            {
+                return STATUS(ENOMEM, "Failed to allocate audio float buffer");
+            }
+            _audio_float_buffer = std::shared_ptr<float[]>(static_cast<float *>(audio_ptr), [](float *p) {
+                if (p)
+                    heap_caps_free(p);
+            });
+
+            void *window_ptr
+                = heap_caps_aligned_alloc(16, FRAME_LEN * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (!window_ptr)
+            {
+                return STATUS(ENOMEM, "Failed to allocate Blackman window buffer");
+            }
+            _blackman_window = std::shared_ptr<float[]>(static_cast<float *>(window_ptr), [](float *p) {
+                if (p)
+                    heap_caps_free(p);
+            });
+
+            _fft_handle = dl_rfft_f32_init(FFT_SIZE, MALLOC_CAP_SPIRAM);
+            if (!_fft_handle)
+            {
+                LOG(ERROR, "ESP-DL RFFT initialization failed");
+                return STATUS(EFAULT, "ESP-DL RFFT initialization failed");
+            }
+
+            for (size_t n = 0; n < FRAME_LEN; ++n)
+            {
+                float n_norm = static_cast<float>(n) / static_cast<float>(FRAME_LEN);
+                _blackman_window[n] = 0.42f - 0.5f * std::cos(2.0f * std::numbers::pi_v<float> * n_norm)
+                                      + 0.08f * std::cos(4.0f * std::numbers::pi_v<float> * n_norm);
+            }
+
+            return STATUS_OK();
+        }
+
     protected:
         inline core::Status forward(const module::MIOS &inputs, module::MIOS &outputs) noexcept override
         {
@@ -178,14 +215,12 @@ namespace porting { namespace algorithms { namespace node {
                     float real = _fft_input_buffer[j * 2 + 0];
                     float imag = _fft_input_buffer[j * 2 + 1];
                     float mag = std::sqrtf(real * real + imag * imag);
-                    current_log_features[j] = std::logf(
-                        mag < std::numeric_limits<float>::epsilon() ? std::numeric_limits<float>::epsilon() : mag);
+                    current_log_features[j] = std::logf(mag + std::numeric_limits<float>::epsilon());
                 }
             }
 
             normalizeGlobally(output_features, OUTPUT_SIZE);
 
-            LOG(DEBUG, "Feature generation completed, output size: %zu", OUTPUT_SIZE);
             return STATUS_OK();
         }
 
@@ -195,8 +230,6 @@ namespace porting { namespace algorithms { namespace node {
         std::shared_ptr<float[]> _fft_input_buffer;
         std::shared_ptr<float[]> _audio_float_buffer;
         std::shared_ptr<float[]> _blackman_window;
-
-        bool _initialized;
 
         inline void convertInt16ToFloat(const int16_t *input, float *output) noexcept
         {
@@ -210,18 +243,17 @@ namespace porting { namespace algorithms { namespace node {
         {
             size_t start_in_padded = frame_idx * HOP_LEN;
             size_t padding_size = HOP_LEN;
-
-            for (size_t i = 0; i < HOP_LEN; ++i)
+            if (start_in_padded < padding_size)
             {
-                size_t pos_in_padded = start_in_padded + i;
-                if (pos_in_padded < padding_size)
-                {
-                    _fft_input_buffer[i] = 0.0f;
-                }
-                else
-                {
-                    _fft_input_buffer[i] = audio_data[pos_in_padded - padding_size];
-                }
+                size_t zero_count = padding_size - start_in_padded;
+                size_t copy_count = HOP_LEN - zero_count;
+                std::memset(_fft_input_buffer.get(), 0, zero_count * sizeof(float));
+                std::memcpy(_fft_input_buffer.get() + zero_count, audio_data, copy_count * sizeof(float));
+            }
+            else
+            {
+                std::memcpy(_fft_input_buffer.get(), audio_data + (start_in_padded - padding_size),
+                    HOP_LEN * sizeof(float));
             }
 
             std::memcpy(_fft_input_buffer.get() + HOP_LEN, audio_data + (frame_idx * HOP_LEN), HOP_LEN * sizeof(float));
@@ -234,14 +266,14 @@ namespace porting { namespace algorithms { namespace node {
 
         inline void normalizeGlobally(float *features, size_t total_features) noexcept
         {
-            double mean = 0.0;
+            float mean = 0.0;
             for (size_t i = 0; i < total_features; ++i)
             {
                 mean += features[i];
             }
             mean /= total_features;
 
-            double variance = 0.0;
+            float variance = 0.0;
             for (size_t i = 0; i < total_features; ++i)
             {
                 float diff = features[i] - mean;
@@ -258,54 +290,7 @@ namespace porting { namespace algorithms { namespace node {
                 features[i] = (features[i] - static_cast<float>(mean)) * inv_std;
             }
         }
-
-        template<typename T>
-        std::shared_ptr<T[]> allocateAligned(size_t count) noexcept
-        {
-            void *ptr = heap_caps_aligned_alloc(16, count * sizeof(T), MALLOC_CAP_SPIRAM);
-            if (!ptr)
-            {
-                return nullptr;
-            }
-
-            return std::shared_ptr<T[]>(static_cast<T *>(ptr), [](T *p) {
-                if (p)
-                {
-                    heap_caps_free(p);
-                }
-            });
-        }
     };
-
-    inline std::shared_ptr<module::MNode> createSpeechCommandsPreprocess(const core::ConfigMap &configs,
-        module::MIOS *inputs, module::MIOS *outputs, int priority)
-    {
-        LOG(DEBUG, "Creating SpeechCommandsPreprocess via builder function");
-
-        module::MIOS input_mios = inputs ? *inputs : module::MIOS {};
-        module::MIOS output_mios = outputs ? *outputs : module::MIOS {};
-
-        auto node = std::make_shared<SpeechCommandsPreprocess>(configs, std::move(input_mios), std::move(output_mios),
-            priority);
-
-        auto init_status = node->initialize();
-        if (!init_status)
-        {
-            LOG(ERROR, "Failed to initialize SpeechCommandsPreprocess: %s", init_status.message().c_str());
-            return nullptr;
-        }
-
-        module::MIOS validate_inputs = inputs ? *inputs : module::MIOS {};
-        module::MIOS validate_outputs = outputs ? *outputs : module::MIOS {};
-        auto validate_status = node->validateTensors(validate_inputs, validate_outputs);
-        if (!validate_status)
-        {
-            LOG(ERROR, "SpeechCommandsPreprocess tensor validation failed: %s", validate_status.message().c_str());
-            return nullptr;
-        }
-
-        return node;
-    }
 
 }}} // namespace porting::algorithms::node
 
