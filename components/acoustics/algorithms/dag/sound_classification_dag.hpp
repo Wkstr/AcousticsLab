@@ -72,11 +72,11 @@ namespace algorithms { namespace dag {
             || !dag->addEdge(feature_node.get(), inference_node.get())
             || !dag->addEdge(inference_node.get(), output_node.get()))
         {
-            // LOG(ERROR, "Failed to add edges to DAG");
+            LOG(ERROR, "Failed to add edges to DAG");
             return nullptr;
         }
 
-        // LOG(INFO, "SoundClassification DAG created successfully");
+        LOG(INFO, "SoundClassification DAG created successfully");
         return dag;
     }
 

@@ -31,7 +31,8 @@
 
 namespace porting {
 
-#define TFLM_OPS_REQUIRED(X) X(Add) X(Conv2D) X(DepthwiseConv2D) X(MaxPool2D) X(Softmax) X(Reshape) X(Relu) X(Relu6)
+#define TFLM_OPS_REQUIRED(X)                                                                                           \
+    X(Add) X(Conv2D) X(DepthwiseConv2D) X(MaxPool2D) X(Softmax) X(Reshape) X(Relu) X(Relu6) X(FullyConnected)
 
 #define TFLM_OPS_COUNT_HELPER(OP_NAME) nullptr,
 #define TFLM_OPS_COUNT(OPS_REQUIRED)   (std::initializer_list<void *> { OPS_REQUIRED(TFLM_OPS_COUNT_HELPER) }.size())
