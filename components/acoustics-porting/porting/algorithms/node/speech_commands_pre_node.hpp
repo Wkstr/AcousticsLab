@@ -61,6 +61,15 @@ namespace porting { namespace algorithms { namespace node {
 
         static core::Status validateTensors(const module::MIOS &inputs, const module::MIOS &outputs) noexcept
         {
+            if (inputs.empty())
+            {
+                if (!outputs.empty() && outputs.size() != 1)
+                {
+                    return STATUS(EINVAL, "SpeechCommandsPreprocess requires exactly 1 output tensor when provided");
+                }
+                return STATUS_OK();
+            }
+
             if (inputs.size() != 1)
             {
                 return STATUS(EINVAL, "SpeechCommandsPreprocess requires exactly 1 input tensor");
@@ -131,6 +140,30 @@ namespace porting { namespace algorithms { namespace node {
     private:
         inline core::Status initialize() noexcept
         {
+            if (this->inputs().empty())
+            {
+                auto input_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Int16,
+                    core::Tensor::Shape(static_cast<int>(AUDIO_SAMPLES)));
+                if (!input_tensor)
+                {
+                    return STATUS(ENOMEM, "Failed to create input tensor");
+                }
+                auto input_mio = std::make_shared<module::MIO>(input_tensor, "audio_input");
+                this->inputs().push_back(input_mio);
+            }
+
+            if (this->outputs().empty())
+            {
+                auto output_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Float32,
+                    core::Tensor::Shape(static_cast<int>(OUTPUT_SIZE)));
+                if (!output_tensor)
+                {
+                    return STATUS(ENOMEM, "Failed to create output tensor");
+                }
+                auto output_mio = std::make_shared<module::MIO>(output_tensor, "feature_data");
+                this->outputs().push_back(output_mio);
+            }
+
             void *fft_ptr = heap_caps_aligned_alloc(16, FFT_SIZE * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (!fft_ptr)
             {
@@ -196,7 +229,10 @@ namespace porting { namespace algorithms { namespace node {
 
             LOG(DEBUG, "Starting feature generation for %zu frames", NUM_FRAMES);
 
-            convertInt16ToFloat(raw_audio_data, _audio_float_buffer.get());
+            for (size_t i = 0; i < AUDIO_SAMPLES; ++i)
+            {
+                _audio_float_buffer[i] = static_cast<float>(raw_audio_data[i]) / 32768.0f;
+            }
 
             for (size_t frame_idx = 0; frame_idx < NUM_FRAMES; ++frame_idx)
             {
@@ -210,12 +246,13 @@ namespace porting { namespace algorithms { namespace node {
                 }
 
                 float *current_log_features = output_features + (frame_idx * FEATURES_PER_FRAME);
-                for (size_t j = 0; j < FEATURES_PER_FRAME; ++j)
+
+                for (size_t j = 0; j < FEATURES_PER_FRAME * 2; j += 2)
                 {
-                    float real = _fft_input_buffer[j * 2 + 0];
-                    float imag = _fft_input_buffer[j * 2 + 1];
-                    float mag = std::sqrtf(real * real + imag * imag);
-                    current_log_features[j] = std::logf(mag + std::numeric_limits<float>::epsilon());
+                    float real = _fft_input_buffer[j];
+                    float imag = _fft_input_buffer[j + 1];
+                    float mag_sq = real * real + imag * imag;
+                    current_log_features[j >> 1] = 0.5f * std::logf(mag_sq + std::numeric_limits<float>::epsilon());
                 }
             }
 
@@ -230,14 +267,6 @@ namespace porting { namespace algorithms { namespace node {
         std::shared_ptr<float[]> _fft_input_buffer;
         std::shared_ptr<float[]> _audio_float_buffer;
         std::shared_ptr<float[]> _blackman_window;
-
-        inline void convertInt16ToFloat(const int16_t *input, float *output) noexcept
-        {
-            for (size_t i = 0; i < AUDIO_SAMPLES; ++i)
-            {
-                output[i] = static_cast<float>(input[i]) / 32768.0f;
-            }
-        }
 
         inline void prepareFrame(const float *audio_data, size_t frame_idx) noexcept
         {
@@ -291,7 +320,6 @@ namespace porting { namespace algorithms { namespace node {
             }
         }
     };
-
 }}} // namespace porting::algorithms::node
 
 #endif // SPEECH_COMMANDS_PRE_NODE_HPP

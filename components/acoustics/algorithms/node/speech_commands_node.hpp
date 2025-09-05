@@ -52,6 +52,11 @@ namespace algorithms { namespace node {
 
         static core::Status validateTensors(const module::MIOS &inputs, const module::MIOS &outputs) noexcept
         {
+            if (inputs.empty() || outputs.empty())
+            {
+                return STATUS_OK();
+            }
+
             if (inputs.size() != 1)
             {
                 return STATUS(EINVAL, "SpeechCommands requires exactly 1 input tensor");
@@ -144,13 +149,37 @@ namespace algorithms { namespace node {
                 return STATUS(ENOENT, "Graph not found");
             }
 
+            auto model_input_tensor = _graph->input(0);
             auto model_output_tensor = _graph->output(0);
-            if (!model_output_tensor)
+            if (!model_input_tensor || !model_output_tensor)
             {
-                return STATUS(EFAULT, "Model graph has no output tensor");
+                return STATUS(EFAULT, "Model graph has no input or output tensor");
             }
 
             _model_output_classes = static_cast<size_t>(model_output_tensor->shape().dot());
+            if (this->inputs().empty())
+            {
+                auto input_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Float32,
+                    model_input_tensor->shape());
+                if (!input_tensor)
+                {
+                    return STATUS(ENOMEM, "Failed to create input tensor");
+                }
+                auto input_mio = std::make_shared<module::MIO>(input_tensor, "feature_input");
+                this->inputs().push_back(input_mio);
+            }
+
+            if (this->outputs().empty())
+            {
+                auto output_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Class,
+                    model_output_tensor->shape());
+                if (!output_tensor)
+                {
+                    return STATUS(ENOMEM, "Failed to create output tensor");
+                }
+                auto output_mio = std::make_shared<module::MIO>(output_tensor, "classification_output");
+                this->outputs().push_back(output_mio);
+            }
 
             auto tensor_validation_status = validateTensorsWithModel();
             if (!tensor_validation_status)
@@ -216,43 +245,14 @@ namespace algorithms { namespace node {
             auto model_output_tensor = _graph->output(0);
 
             auto status = copyInputData(input_tensor, model_input_tensor);
-            if (!status)
-            {
-                return status;
-            }
-
             status = _graph->forward();
-            if (!status)
-            {
-                LOG(ERROR, "Model inference failed: %s", status.message().c_str());
-                return status;
-            }
 
             if (output_tensor->dtype() != core::Tensor::Type::Class)
-            {
-                return STATUS(EINVAL, "Output tensor must be of class_t type");
-            }
-
-            const core::Tensor::Shape new_shape(1, static_cast<int>(_model_output_classes));
-            if (!output_tensor->reshape(new_shape))
-            {
-                return STATUS(EINVAL, "Failed to reshape output tensor");
-            }
-
+                const core::Tensor::Shape new_shape(1, static_cast<int>(_model_output_classes));
             core::class_t *class_data = output_tensor->data<core::class_t>();
-            if (!class_data)
-            {
-                return STATUS(EFAULT, "Failed to get class_t data pointer");
-            }
-
             if (model_output_tensor->dtype() == core::Tensor::Type::Float32)
             {
                 const float *model_data = model_output_tensor->data<float>();
-                if (!model_data)
-                {
-                    return STATUS(EFAULT, "Failed to get model output data pointer");
-                }
-
                 for (size_t i = 0; i < _model_output_classes; ++i)
                 {
                     class_data[i] = { static_cast<int>(i), model_data[i] };
@@ -261,11 +261,6 @@ namespace algorithms { namespace node {
             else if (model_output_tensor->dtype() == core::Tensor::Type::Int8)
             {
                 const int8_t *model_data = model_output_tensor->data<int8_t>();
-                if (!model_data)
-                {
-                    return STATUS(EFAULT, "Failed to get model output data pointer");
-                }
-
                 auto quant_params = _graph->outputQuantParams(0);
                 float scale = quant_params.scale();
                 int32_t zero_point = quant_params.zeroPoint();
@@ -275,8 +270,6 @@ namespace algorithms { namespace node {
                     float confidence = static_cast<float>(model_data[i] - zero_point) * scale;
                     class_data[i] = { static_cast<int>(i), confidence };
                 }
-                LOG(DEBUG, "Dequantized and processed %zu int8 output elements to class_t (scale=%.6f, zero_point=%ld)",
-                    _model_output_classes, scale, (long)zero_point);
             }
             else
             {
@@ -299,10 +292,10 @@ namespace algorithms { namespace node {
 
         inline core::Status copyInputData(core::Tensor *input_tensor, core::Tensor *model_input_tensor) const noexcept
         {
-            const size_t elements_to_copy = std::min(static_cast<size_t>(input_tensor->shape().dot()),
+            const size_t elements_to_process = std::min(static_cast<size_t>(input_tensor->shape().dot()),
                 static_cast<size_t>(model_input_tensor->shape().dot()));
 
-            if (elements_to_copy == 0)
+            if (elements_to_process == 0)
             {
                 return STATUS(EINVAL, "No elements to copy");
             }
@@ -322,23 +315,7 @@ namespace algorithms { namespace node {
                     {
                         return STATUS(EFAULT, "Failed to get input data pointer");
                     }
-                    std::memcpy(model_data, input_data, elements_to_copy * sizeof(float));
-                }
-                else if (input_tensor->dtype() == core::Tensor::Type::Int16)
-                {
-                    const int16_t *input_data = input_tensor->data<int16_t>();
-                    if (!input_data)
-                    {
-                        return STATUS(EFAULT, "Failed to get input data pointer");
-                    }
-                    for (size_t i = 0; i < elements_to_copy; ++i)
-                    {
-                        model_data[i] = static_cast<float>(input_data[i]) / 32768.0f;
-                    }
-                }
-                else
-                {
-                    return STATUS(ENOTSUP, "Unsupported input tensor data type for float32 model");
+                    std::memcpy(model_data, input_data, elements_to_process * sizeof(float));
                 }
             }
             else if (model_input_tensor->dtype() == core::Tensor::Type::Int8)
@@ -356,19 +333,12 @@ namespace algorithms { namespace node {
                 if (input_tensor->dtype() == core::Tensor::Type::Float32)
                 {
                     const float *input_data = input_tensor->data<float>();
-                    if (!input_data)
-                    {
-                        return STATUS(EFAULT, "Failed to get input data pointer");
-                    }
-
                     const float inv_scale = 1.0f / scale;
-                    for (size_t i = 0; i < elements_to_copy; ++i)
+                    for (size_t i = 0; i < elements_to_process; ++i)
                     {
                         int32_t quantized_value = static_cast<int32_t>((input_data[i] * inv_scale)) + zero_point;
                         model_data[i] = static_cast<int8_t>(quantized_value);
                     }
-                    LOG(DEBUG, "Quantized and copied %zu float32 to int8 elements (scale=%.6f, zero_point=%ld)",
-                        elements_to_copy, scale, (long)zero_point);
                 }
                 else
                 {

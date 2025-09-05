@@ -87,6 +87,16 @@ public:
         return _outputs;
     }
 
+    inline MIOS &inputs() noexcept
+    {
+        return _inputs;
+    }
+
+    inline MIOS &outputs() noexcept
+    {
+        return _outputs;
+    }
+
     std::shared_ptr<MIO> input(size_t index) const noexcept
     {
         if (index < _inputs.size()) [[likely]]
