@@ -482,12 +482,12 @@ struct TaskSC final
                 data["ts"] += std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - _start_time)
                                   .count();
-                if (_output) [[likely]]
+                auto cls_data = data["data"].writer<core::ArrayWriter>();
+                if (status && _output) [[likely]]
                 {
-                    auto cls_data = data["data"].writer<core::ArrayWriter>();
-                    const size_t size = _output->shape()[0];
+                    const int size = _output->shape().size() ? _output->shape()[0] : 0;
                     const auto classes = _output->data<core::class_t>();
-                    for (size_t i = 0; i < size; ++i)
+                    for (int i = 0; i < size; ++i)
                     {
                         auto cls = cls_data.writer<core::ArrayWriter>();
                         const int id = classes[i].id;
