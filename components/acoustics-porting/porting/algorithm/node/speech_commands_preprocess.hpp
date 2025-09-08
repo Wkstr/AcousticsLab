@@ -29,7 +29,6 @@ class SpeechCommandsPreprocess final: public module::MNode
     static constexpr inline const size_t NUM_FRAMES = 43;
     static constexpr inline const size_t FFT_SIZE = 2048;
     static constexpr inline const size_t FEATURES_PER_FRAME = 232;
-    static constexpr inline const size_t OUTPUT_SIZE = NUM_FRAMES * FEATURES_PER_FRAME;
     static constexpr inline const float NORM_BOUND_I16 = -static_cast<float>(std::numeric_limits<int16_t>::min());
 
 public:
@@ -212,7 +211,7 @@ private:
             }
         }
 
-        normalizeGlobally(output_features, OUTPUT_SIZE);
+        normalizeGlobally(output_features, output_tensor->shape().dot() > 0 ? output_tensor->shape().dot() : 0);
 
         return STATUS_OK();
     }
