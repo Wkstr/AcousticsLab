@@ -1,4 +1,5 @@
 #pragma once
+#if defined(PORTING_LIB_DL_FFT_ENABLE) && PORTING_LIB_DL_FFT_ENABLE
 #ifndef SPEECH_COMMANDS_PREPROCESS_HPP
 #define SPEECH_COMMANDS_PREPROCESS_HPP
 
@@ -276,4 +277,6 @@ private:
 
 } // namespace porting::algorithms::node
 
-#endif
+#endif // SPEECH_COMMANDS_PREPROCESS_HPP
+
+#endif // PORTING_LIB_DL_FFT_ENABLE
