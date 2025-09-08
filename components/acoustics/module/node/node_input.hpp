@@ -25,7 +25,8 @@ public:
 
     ~MNInput() override = default;
 
-    static std::shared_ptr<MNode> create(const core::ConfigMap &configs, MIOS *inputs, MIOS *outputs, int priority)
+    static std::shared_ptr<MNode> create(const core::ConfigMap &configs, const MIOS *inputs, const MIOS *outputs,
+        int priority)
     {
         if (!inputs || inputs->empty()) [[unlikely]]
         {

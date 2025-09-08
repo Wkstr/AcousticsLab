@@ -7,7 +7,7 @@ namespace bridge {
 void __REGISTER_EXTERNAL_MODULE_NODE_BUILDER__()
 {
     auto status = module::MNodeBuilderRegistry::registerNodeBuilder("SpeechCommandsPreprocess",
-        porting::algorithms::node::SpeechCommandsPreprocess::create, false);
+        porting::algorithms::node::SpeechCommandsPreprocess::create, true);
 
     if (!status)
     {

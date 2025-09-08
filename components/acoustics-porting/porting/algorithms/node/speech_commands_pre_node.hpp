@@ -27,16 +27,48 @@ namespace porting { namespace algorithms { namespace node {
         static constexpr size_t FEATURES_PER_FRAME = 232;
         static constexpr size_t OUTPUT_SIZE = NUM_FRAMES * FEATURES_PER_FRAME;
 
-        static std::shared_ptr<module::MNode> create(const core::ConfigMap &configs, module::MIOS *inputs,
-            module::MIOS *outputs, int priority)
+        static std::shared_ptr<module::MNode> create(const core::ConfigMap &configs, const module::MIOS *inputs,
+            const module::MIOS *outputs, int priority)
         {
+            if (inputs && inputs->size() > 1)
+            {
+                return nullptr;
+            }
+            if (outputs && outputs->size() > 1)
+            {
+                return nullptr;
+            }
+
             module::MIOS input_mios = inputs ? *inputs : module::MIOS {};
             module::MIOS output_mios = outputs ? *outputs : module::MIOS {};
+
+            if (input_mios.empty())
+            {
+                auto input_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Int16,
+                    core::Tensor::Shape(static_cast<int>(AUDIO_SAMPLES)));
+                if (!input_tensor)
+                {
+                    return nullptr;
+                }
+                auto input_mio = std::make_shared<module::MIO>(input_tensor, "audio_input");
+                input_mios.push_back(input_mio);
+            }
+
+            if (output_mios.empty())
+            {
+                auto output_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Float32,
+                    core::Tensor::Shape(static_cast<int>(OUTPUT_SIZE)));
+                if (!output_tensor)
+                {
+                    return nullptr;
+                }
+                auto output_mio = std::make_shared<module::MIO>(output_tensor, "feature_data");
+                output_mios.push_back(output_mio);
+            }
 
             auto validate_status = validateTensors(input_mios, output_mios);
             if (!validate_status)
             {
-                LOG(ERROR, "SpeechCommandsPreprocess tensor validation failed: %s", validate_status.message().c_str());
                 return nullptr;
             }
 
@@ -45,14 +77,12 @@ namespace porting { namespace algorithms { namespace node {
 
             if (!node)
             {
-                LOG(ERROR, "Failed to create SpeechCommandsPreprocess instance");
                 return nullptr;
             }
 
             auto init_status = node->initialize();
             if (!init_status)
             {
-                LOG(ERROR, "Failed to initialize SpeechCommandsPreprocess: %s", init_status.message().c_str());
                 return nullptr;
             }
 
@@ -90,29 +120,21 @@ namespace porting { namespace algorithms { namespace node {
 
             if (input_tensor->dtype() != core::Tensor::Type::Int16)
             {
-                LOG(ERROR, "Input tensor data type mismatch: expected %d, got %d",
-                    static_cast<int>(core::Tensor::Type::Int16), static_cast<int>(input_tensor->dtype()));
                 return STATUS(EINVAL, "Input tensor data type mismatch");
             }
 
-            if (static_cast<size_t>(input_tensor->shape().dot()) != AUDIO_SAMPLES)
+            if (input_tensor->shape().dot() != static_cast<int>(AUDIO_SAMPLES))
             {
-                LOG(ERROR, "Input tensor size mismatch: expected %zu, got %d", AUDIO_SAMPLES,
-                    input_tensor->shape().dot());
                 return STATUS(EINVAL, "Input tensor size mismatch");
             }
 
             if (output_tensor->dtype() != core::Tensor::Type::Float32)
             {
-                LOG(ERROR, "Output tensor data type mismatch: expected %d, got %d",
-                    static_cast<int>(core::Tensor::Type::Float32), static_cast<int>(output_tensor->dtype()));
                 return STATUS(EINVAL, "Output tensor data type mismatch");
             }
 
-            if (static_cast<size_t>(output_tensor->shape().dot()) != OUTPUT_SIZE)
+            if (output_tensor->shape().dot() != static_cast<size_t>(OUTPUT_SIZE))
             {
-                LOG(ERROR, "Output tensor size mismatch: expected %zu, got %d", OUTPUT_SIZE,
-                    output_tensor->shape().dot());
                 return STATUS(EINVAL, "Output tensor size mismatch");
             }
 
@@ -140,30 +162,6 @@ namespace porting { namespace algorithms { namespace node {
     private:
         inline core::Status initialize() noexcept
         {
-            if (this->inputs().empty())
-            {
-                auto input_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Int16,
-                    core::Tensor::Shape(static_cast<int>(AUDIO_SAMPLES)));
-                if (!input_tensor)
-                {
-                    return STATUS(ENOMEM, "Failed to create input tensor");
-                }
-                auto input_mio = std::make_shared<module::MIO>(input_tensor, "audio_input");
-                this->inputs().push_back(input_mio);
-            }
-
-            if (this->outputs().empty())
-            {
-                auto output_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Float32,
-                    core::Tensor::Shape(static_cast<int>(OUTPUT_SIZE)));
-                if (!output_tensor)
-                {
-                    return STATUS(ENOMEM, "Failed to create output tensor");
-                }
-                auto output_mio = std::make_shared<module::MIO>(output_tensor, "feature_data");
-                this->outputs().push_back(output_mio);
-            }
-
             void *fft_ptr = heap_caps_aligned_alloc(16, FFT_SIZE * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (!fft_ptr)
             {
@@ -199,7 +197,6 @@ namespace porting { namespace algorithms { namespace node {
             _fft_handle = dl_rfft_f32_init(FFT_SIZE, MALLOC_CAP_SPIRAM);
             if (!_fft_handle)
             {
-                LOG(ERROR, "ESP-DL RFFT initialization failed");
                 return STATUS(EFAULT, "ESP-DL RFFT initialization failed");
             }
 
@@ -227,8 +224,6 @@ namespace porting { namespace algorithms { namespace node {
                 return STATUS(EFAULT, "Failed to get tensor data pointers");
             }
 
-            LOG(DEBUG, "Starting feature generation for %zu frames", NUM_FRAMES);
-
             for (size_t i = 0; i < AUDIO_SAMPLES; ++i)
             {
                 _audio_float_buffer[i] = static_cast<float>(raw_audio_data[i]) / 32768.0f;
@@ -239,11 +234,6 @@ namespace porting { namespace algorithms { namespace node {
                 prepareFrame(_audio_float_buffer.get(), frame_idx);
 
                 esp_err_t fft_result = dl_rfft_f32_run(_fft_handle, _fft_input_buffer.get());
-                if (fft_result != ESP_OK)
-                {
-                    LOG(ERROR, "ESP-DL RFFT execution failed with error: %d", fft_result);
-                    return STATUS(EFAULT, "ESP-DL RFFT execution failed");
-                }
 
                 float *current_log_features = output_features + (frame_idx * FEATURES_PER_FRAME);
 
@@ -275,7 +265,7 @@ namespace porting { namespace algorithms { namespace node {
             if (start_in_padded < padding_size)
             {
                 size_t zero_count = padding_size - start_in_padded;
-                size_t copy_count = HOP_LEN - zero_count;
+                size_t copy_count = padding_size - zero_count;
                 std::memset(_fft_input_buffer.get(), 0, zero_count * sizeof(float));
                 std::memcpy(_fft_input_buffer.get() + zero_count, audio_data, copy_count * sizeof(float));
             }
