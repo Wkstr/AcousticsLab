@@ -35,8 +35,8 @@ class SpeechCommandsPreprocess final: public module::MNode
 public:
     static inline constexpr const std::string_view node_name = "SpeechCommandsPreprocess";
 
-    static std::shared_ptr<module::MNode> create(const core::ConfigMap &configs, module::MIOS *inputs,
-        module::MIOS *outputs, int priority)
+    static std::shared_ptr<module::MNode> create(const core::ConfigMap &configs, const module::MIOS *inputs,
+        const module::MIOS *outputs, int priority)
     {
         auto input_mios = getInputMIOS(inputs);
         if (input_mios.empty())
@@ -112,7 +112,7 @@ public:
     }
 
 private:
-    static module::MIOS getInputMIOS(module::MIOS *inputs) noexcept
+    static module::MIOS getInputMIOS(const module::MIOS *inputs) noexcept
     {
         if (inputs)
         {
@@ -138,7 +138,7 @@ private:
         return { mio };
     }
 
-    static module::MIOS getOutputMIOS(module::MIOS *outputs) noexcept
+    static module::MIOS getOutputMIOS(const module::MIOS *outputs) noexcept
     {
         if (outputs)
         {

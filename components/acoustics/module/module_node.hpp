@@ -24,14 +24,14 @@ class MNode;
 class MNodeBuilderRegistry final
 {
 public:
-    using NodeBuilder = std::shared_ptr<MNode> (*)(const core::ConfigMap &, MIOS *, MIOS *, int);
+    using NodeBuilder = std::shared_ptr<MNode> (*)(const core::ConfigMap &, const MIOS *, const MIOS *, int);
     using NodeBuilderMap = std::unordered_map<std::string_view, NodeBuilder>;
 
     MNodeBuilderRegistry() = default;
     ~MNodeBuilderRegistry() = default;
 
     inline static std::shared_ptr<MNode> getNode(std::string_view name, const core::ConfigMap &configs = {},
-        MIOS *inputs = nullptr, MIOS *outputs = nullptr, int priority = 0) noexcept
+        const MIOS *inputs = nullptr, const MIOS *outputs = nullptr, int priority = 0) noexcept
     {
         auto it = _nodes.find(name);
         if (it != _nodes.end()) [[likely]]
