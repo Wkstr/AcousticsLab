@@ -1,315 +1,280 @@
 #pragma once
-#ifndef SPEECH_COMMANDS_PRE_NODE_HPP
-#define SPEECH_COMMANDS_PRE_NODE_HPP
+#ifndef SPEECH_COMMANDS_PREPROCESS_HPP
+#define SPEECH_COMMANDS_PREPROCESS_HPP
 
 #include "core/config_object.hpp"
 #include "core/logger.hpp"
 #include "core/status.hpp"
 #include "core/tensor.hpp"
+
 #include "module/module_node.hpp"
 
 #include <dl_rfft.h>
+#include <esp_err.h>
 #include <esp_heap_caps.h>
 
 #include <cstdint>
 #include <memory>
+#include <new>
+#include <string>
+#include <string_view>
 
-namespace porting { namespace algorithms { namespace node {
+namespace porting::algorithms::node {
 
-    class SpeechCommandsPreprocess final: public module::MNode
+class SpeechCommandsPreprocess final: public module::MNode
+{
+    static constexpr inline const size_t AUDIO_SAMPLES = 44032;
+    static constexpr inline const size_t FRAME_LEN = 2048;
+    static constexpr inline const size_t HOP_LEN = 1024;
+    static constexpr inline const size_t NUM_FRAMES = 43;
+    static constexpr inline const size_t FFT_SIZE = 2048;
+    static constexpr inline const size_t FEATURES_PER_FRAME = 232;
+    static constexpr inline const size_t OUTPUT_SIZE = NUM_FRAMES * FEATURES_PER_FRAME;
+    static constexpr inline const float NORM_BOUND_I16 = -static_cast<float>(std::numeric_limits<int16_t>::min());
+
+public:
+    static inline constexpr const std::string_view node_name = "SpeechCommandsPreprocess";
+
+    static std::shared_ptr<module::MNode> create(const core::ConfigMap &configs, module::MIOS *inputs,
+        module::MIOS *outputs, int priority)
     {
-    public:
-        static constexpr size_t AUDIO_SAMPLES = 44032;
-        static constexpr size_t FRAME_LEN = 2048;
-        static constexpr size_t HOP_LEN = 1024;
-        static constexpr size_t NUM_FRAMES = 43;
-        static constexpr size_t FFT_SIZE = 2048;
-        static constexpr size_t FEATURES_PER_FRAME = 232;
-        static constexpr size_t OUTPUT_SIZE = NUM_FRAMES * FEATURES_PER_FRAME;
-
-        static std::shared_ptr<module::MNode> create(const core::ConfigMap &configs, const module::MIOS *inputs,
-            const module::MIOS *outputs, int priority)
+        auto input_mios = getInputMIOS(inputs);
+        if (input_mios.empty())
         {
-            if (inputs && inputs->size() > 1)
-            {
-                return nullptr;
-            }
-            if (outputs && outputs->size() > 1)
-            {
-                return nullptr;
-            }
+            LOG(ERROR, "Failed to get or create input MIOS");
+            return {};
+        }
 
-            module::MIOS input_mios = inputs ? *inputs : module::MIOS {};
-            module::MIOS output_mios = outputs ? *outputs : module::MIOS {};
+        auto output_mios = getOutputMIOS(outputs);
+        if (output_mios.empty())
+        {
+            LOG(ERROR, "Failed to get or create output MIOS");
+            return {};
+        }
 
-            if (input_mios.empty())
-            {
-                auto input_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Int16,
-                    core::Tensor::Shape(static_cast<int>(AUDIO_SAMPLES)));
-                if (!input_tensor)
-                {
-                    return nullptr;
-                }
-                auto input_mio = std::make_shared<module::MIO>(input_tensor, "audio_input");
-                input_mios.push_back(input_mio);
-            }
+        dl_fft_f32_t *fft_handle = nullptr;
+        float *fft_buffer = nullptr;
+        float *frame_buffer = nullptr;
+        float *window_buffer = nullptr;
+        if (!(fft_handle = dl_rfft_f32_init(FFT_SIZE, MALLOC_CAP_SPIRAM))
+            || !(fft_buffer = static_cast<float *>(
+                     heap_caps_aligned_alloc(16, FFT_SIZE * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)))
+            || !(frame_buffer = new (std::nothrow) float[HOP_LEN])
+            || !(window_buffer = new (std::nothrow) float[FRAME_LEN]))
+            goto Err;
 
-            if (output_mios.empty())
-            {
-                auto output_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Float32,
-                    core::Tensor::Shape(static_cast<int>(OUTPUT_SIZE)));
-                if (!output_tensor)
-                {
-                    return nullptr;
-                }
-                auto output_mio = std::make_shared<module::MIO>(output_tensor, "feature_data");
-                output_mios.push_back(output_mio);
-            }
+        fillBlackmanWindow(window_buffer, FRAME_LEN);
 
-            auto validate_status = validateTensors(input_mios, output_mios);
-            if (!validate_status)
-            {
-                return nullptr;
-            }
-
-            auto node = std::shared_ptr<SpeechCommandsPreprocess>(
-                new SpeechCommandsPreprocess(configs, std::move(input_mios), std::move(output_mios), priority));
-
+        {
+            std::shared_ptr<module::MNode> node(
+                new (std::nothrow) SpeechCommandsPreprocess(configs, std::move(input_mios), std::move(output_mios),
+                    priority, fft_handle, fft_buffer, frame_buffer, window_buffer));
             if (!node)
-            {
-                return nullptr;
-            }
-
-            auto init_status = node->initialize();
-            if (!init_status)
-            {
-                return nullptr;
-            }
-
+                goto Err;
             return node;
         }
 
-        static core::Status validateTensors(const module::MIOS &inputs, const module::MIOS &outputs) noexcept
+    Err:
+        LOG(ERROR, "Failed to allocate resources");
+        if (fft_handle)
+            dl_rfft_f32_deinit(fft_handle);
+        if (fft_buffer)
+            heap_caps_free(fft_buffer);
+        if (frame_buffer)
+            delete[] frame_buffer;
+        if (window_buffer)
+            delete[] window_buffer;
+        return {};
+    }
+
+    inline ~SpeechCommandsPreprocess() noexcept override
+    {
+        if (_fft_handle)
         {
-            if (inputs.empty())
-            {
-                if (!outputs.empty() && outputs.size() != 1)
-                {
-                    return STATUS(EINVAL, "SpeechCommandsPreprocess requires exactly 1 output tensor when provided");
-                }
-                return STATUS_OK();
-            }
+            dl_rfft_f32_deinit(_fft_handle);
+            _fft_handle = nullptr;
+        }
+        if (_fft_buffer)
+        {
+            heap_caps_free(_fft_buffer);
+            _fft_buffer = nullptr;
+        }
+        if (_frame_buffer)
+        {
+            delete[] _frame_buffer;
+            _frame_buffer = nullptr;
+        }
+        if (_window_buffer)
+        {
+            delete[] _window_buffer;
+            _window_buffer = nullptr;
+        }
+    }
 
-            if (inputs.size() != 1)
-            {
-                return STATUS(EINVAL, "SpeechCommandsPreprocess requires exactly 1 input tensor");
-            }
-
-            if (outputs.size() != 1)
-            {
-                return STATUS(EINVAL, "SpeechCommandsPreprocess requires exactly 1 output tensor");
-            }
-
-            const auto &input_tensor = inputs[0]->operator()();
-            const auto &output_tensor = outputs[0]->operator()();
-
-            if (!input_tensor || !output_tensor)
-            {
-                return STATUS(EINVAL, "Input or output tensor is null");
-            }
-
-            if (input_tensor->dtype() != core::Tensor::Type::Int16)
-            {
-                return STATUS(EINVAL, "Input tensor data type mismatch");
-            }
-
-            if (input_tensor->shape().dot() != static_cast<int>(AUDIO_SAMPLES))
-            {
-                return STATUS(EINVAL, "Input tensor size mismatch");
-            }
-
-            if (output_tensor->dtype() != core::Tensor::Type::Float32)
-            {
-                return STATUS(EINVAL, "Output tensor data type mismatch");
-            }
-
-            if (output_tensor->shape().dot() != static_cast<size_t>(OUTPUT_SIZE))
-            {
-                return STATUS(EINVAL, "Output tensor size mismatch");
-            }
-
-            return STATUS_OK();
+private:
+    static module::MIOS getInputMIOS(module::MIOS *inputs) noexcept
+    {
+        if (inputs)
+        {
+            if (inputs->size() != 1)
+                return {};
+            const auto &mio = (*inputs)[0];
+            if (!mio)
+                return {};
+            auto *tensor = mio->operator()();
+            if (!tensor || !tensor->data() || tensor->dtype() != core::Tensor::Type::Int16
+                || tensor->shape().size() != 2 || tensor->shape()[0] != AUDIO_SAMPLES || tensor->shape()[1] != 1)
+                return {};
+            return *inputs;
         }
 
-    private:
-        inline SpeechCommandsPreprocess(const core::ConfigMap &configs, module::MIOS inputs, module::MIOS outputs,
-            int priority)
-            : module::MNode("SpeechCommandsPreprocess", std::move(inputs), std::move(outputs), priority),
-              _fft_handle(nullptr), _fft_input_buffer(nullptr), _audio_float_buffer(nullptr), _blackman_window(nullptr)
+        auto tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Int16,
+            core::Tensor::Shape(static_cast<int>(AUDIO_SAMPLES), 1));
+        if (!tensor)
+            return {};
+        auto mio = std::make_shared<module::MIO>(tensor, "pcm_input");
+        if (!mio)
+            return {};
+        return { mio };
+    }
+
+    static module::MIOS getOutputMIOS(module::MIOS *outputs) noexcept
+    {
+        if (outputs)
         {
+            if (outputs->size() != 1)
+                return {};
+            const auto &mio = (*outputs)[0];
+            if (!mio)
+                return {};
+            auto *tensor = mio->operator()();
+            if (!tensor || !tensor->data() || tensor->dtype() != core::Tensor::Type::Float32
+                || tensor->shape().size() != 4 || tensor->shape()[0] != 1 || tensor->shape()[1] != NUM_FRAMES
+                || tensor->shape()[2] != FEATURES_PER_FRAME || tensor->shape()[3] != 1)
+                return {};
+            return *outputs;
         }
 
-    public:
-        inline ~SpeechCommandsPreprocess() override
+        auto tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Float32,
+            core::Tensor::Shape(1, static_cast<int>(NUM_FRAMES), static_cast<int>(FEATURES_PER_FRAME), 1));
+        if (!tensor)
+            return {};
+        auto mio = std::make_shared<module::MIO>(tensor, "feature_output");
+        if (!mio)
+            return {};
+        return { mio };
+    }
+
+    static void fillBlackmanWindow(float *buffer, size_t size) noexcept
+    {
+        for (size_t i = 0; i < size; ++i)
         {
-            if (_fft_handle)
-            {
-                dl_rfft_f32_deinit(_fft_handle);
-                _fft_handle = nullptr;
-            }
+            float n = static_cast<float>(i) / static_cast<float>(size);
+            buffer[i] = 0.42f - 0.5f * std::cos(2.0f * std::numbers::pi_v<float> * n)
+                        + 0.08f * std::cos(4.0f * std::numbers::pi_v<float> * n);
+        }
+    }
+
+    SpeechCommandsPreprocess(const core::ConfigMap &configs, module::MIOS inputs, module::MIOS outputs, int priority,
+        dl_fft_f32_t *fft_handle, float *fft_buffer, float *frame_buffer, float *window_buffer) noexcept
+        : module::MNode(std::string(node_name), std::move(inputs), std::move(outputs), priority),
+          _fft_handle(fft_handle), _fft_buffer(fft_buffer), _frame_buffer(frame_buffer), _window_buffer(window_buffer)
+    {
+    }
+
+    inline core::Status forward(const module::MIOS &inputs, module::MIOS &outputs) noexcept override
+    {
+        const auto &input_tensor = inputs[0]->operator()();
+        const auto &output_tensor = outputs[0]->operator()();
+        const int16_t *input_data = input_tensor->data<int16_t>();
+        float *output_features = output_tensor->data<float>();
+        if (!input_data || !output_features)
+        {
+            return STATUS(EFAULT, "Tensor data is null");
         }
 
-    private:
-        inline core::Status initialize() noexcept
+        for (size_t frame_idx = 0; frame_idx < NUM_FRAMES; ++frame_idx)
         {
-            void *fft_ptr = heap_caps_aligned_alloc(16, FFT_SIZE * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-            if (!fft_ptr)
-            {
-                return STATUS(ENOMEM, "Failed to allocate FFT input buffer");
-            }
-            _fft_input_buffer = std::shared_ptr<float[]>(static_cast<float *>(fft_ptr), [](float *p) {
-                if (p)
-                    heap_caps_free(p);
-            });
+            prepareFrame(input_data, frame_idx);
 
-            void *audio_ptr
-                = heap_caps_aligned_alloc(16, AUDIO_SAMPLES * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-            if (!audio_ptr)
+            esp_err_t ret = dl_rfft_f32_run(_fft_handle, _fft_buffer);
+            if (ret != ESP_OK)
             {
-                return STATUS(ENOMEM, "Failed to allocate audio float buffer");
-            }
-            _audio_float_buffer = std::shared_ptr<float[]>(static_cast<float *>(audio_ptr), [](float *p) {
-                if (p)
-                    heap_caps_free(p);
-            });
-
-            void *window_ptr
-                = heap_caps_aligned_alloc(16, FRAME_LEN * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-            if (!window_ptr)
-            {
-                return STATUS(ENOMEM, "Failed to allocate Blackman window buffer");
-            }
-            _blackman_window = std::shared_ptr<float[]>(static_cast<float *>(window_ptr), [](float *p) {
-                if (p)
-                    heap_caps_free(p);
-            });
-
-            _fft_handle = dl_rfft_f32_init(FFT_SIZE, MALLOC_CAP_SPIRAM);
-            if (!_fft_handle)
-            {
-                return STATUS(EFAULT, "ESP-DL RFFT initialization failed");
+                return STATUS(EFAULT, std::string("FFT computation failed: ") + esp_err_to_name(ret));
             }
 
-            for (size_t n = 0; n < FRAME_LEN; ++n)
+            float *features = output_features + (frame_idx * FEATURES_PER_FRAME);
+            for (size_t i = 0; i < FEATURES_PER_FRAME * 2; i += 2)
             {
-                float n_norm = static_cast<float>(n) / static_cast<float>(FRAME_LEN);
-                _blackman_window[n] = 0.42f - 0.5f * std::cos(2.0f * std::numbers::pi_v<float> * n_norm)
-                                      + 0.08f * std::cos(4.0f * std::numbers::pi_v<float> * n_norm);
-            }
-
-            return STATUS_OK();
-        }
-
-    protected:
-        inline core::Status forward(const module::MIOS &inputs, module::MIOS &outputs) noexcept override
-        {
-            const auto &input_tensor = inputs[0]->operator()();
-            const auto &output_tensor = outputs[0]->operator()();
-
-            const int16_t *raw_audio_data = input_tensor->data<int16_t>();
-            float *output_features = output_tensor->data<float>();
-
-            if (!raw_audio_data || !output_features)
-            {
-                return STATUS(EFAULT, "Failed to get tensor data pointers");
-            }
-
-            for (size_t i = 0; i < AUDIO_SAMPLES; ++i)
-            {
-                _audio_float_buffer[i] = static_cast<float>(raw_audio_data[i]) / 32768.0f;
-            }
-
-            for (size_t frame_idx = 0; frame_idx < NUM_FRAMES; ++frame_idx)
-            {
-                prepareFrame(_audio_float_buffer.get(), frame_idx);
-
-                esp_err_t fft_result = dl_rfft_f32_run(_fft_handle, _fft_input_buffer.get());
-
-                float *current_log_features = output_features + (frame_idx * FEATURES_PER_FRAME);
-
-                for (size_t j = 0; j < FEATURES_PER_FRAME * 2; j += 2)
-                {
-                    float real = _fft_input_buffer[j];
-                    float imag = _fft_input_buffer[j + 1];
-                    float mag_sq = real * real + imag * imag;
-                    current_log_features[j >> 1] = 0.5f * std::logf(mag_sq + std::numeric_limits<float>::epsilon());
-                }
-            }
-
-            normalizeGlobally(output_features, OUTPUT_SIZE);
-
-            return STATUS_OK();
-        }
-
-    private:
-        dl_fft_f32_t *_fft_handle;
-
-        std::shared_ptr<float[]> _fft_input_buffer;
-        std::shared_ptr<float[]> _audio_float_buffer;
-        std::shared_ptr<float[]> _blackman_window;
-
-        inline void prepareFrame(const float *audio_data, size_t frame_idx) noexcept
-        {
-            size_t start_in_padded = frame_idx * HOP_LEN;
-            size_t padding_size = HOP_LEN;
-            if (start_in_padded < padding_size)
-            {
-                size_t zero_count = padding_size - start_in_padded;
-                size_t copy_count = padding_size - zero_count;
-                std::memset(_fft_input_buffer.get(), 0, zero_count * sizeof(float));
-                std::memcpy(_fft_input_buffer.get() + zero_count, audio_data, copy_count * sizeof(float));
-            }
-            else
-            {
-                std::memcpy(_fft_input_buffer.get(), audio_data + (start_in_padded - padding_size),
-                    HOP_LEN * sizeof(float));
-            }
-
-            std::memcpy(_fft_input_buffer.get() + HOP_LEN, audio_data + (frame_idx * HOP_LEN), HOP_LEN * sizeof(float));
-
-            for (size_t i = 0; i < FRAME_LEN; ++i)
-            {
-                _fft_input_buffer[i] *= _blackman_window[i];
+                float real = _fft_buffer[i];
+                float imag = _fft_buffer[i + 1];
+                features[i >> 1] = 0.5f * std::logf(real * real + imag * imag + std::numeric_limits<float>::epsilon());
             }
         }
 
-        inline void normalizeGlobally(float *features, size_t total_features) noexcept
+        normalizeGlobally(output_features, OUTPUT_SIZE);
+
+        return STATUS_OK();
+    }
+
+    inline void fillFrameBuffer(const int16_t *input, size_t size) noexcept
+    {
+        for (size_t i = 0; i < size; ++i)
         {
-            float mean = 0.0;
-            for (size_t i = 0; i < total_features; ++i)
-            {
-                mean += features[i];
-            }
-            mean /= total_features;
-
-            float variance = 0.0;
-            for (size_t i = 0; i < total_features; ++i)
-            {
-                float diff = features[i] - mean;
-                variance += diff * diff;
-            }
-            variance /= total_features;
-            float std_dev = std::sqrtf(variance);
-
-            const float epsilon = std::numeric_limits<float>::epsilon();
-            float inv_std = 1.0f / (std_dev + epsilon);
-
-            for (size_t i = 0; i < total_features; ++i)
-            {
-                features[i] = (features[i] - static_cast<float>(mean)) * inv_std;
-            }
+            _frame_buffer[i] = static_cast<float>(input[i]) / NORM_BOUND_I16;
         }
-    };
-}}} // namespace porting::algorithms::node
+    }
 
-#endif // SPEECH_COMMANDS_PRE_NODE_HPP
+    inline void prepareFrame(const int16_t *input, size_t frame_idx) noexcept
+    {
+        const size_t hop_bytes = HOP_LEN * sizeof(float);
+
+        if (frame_idx != 0)
+            std::memcpy(_fft_buffer, _frame_buffer, hop_bytes);
+        else
+            std::memset(_fft_buffer, 0, hop_bytes);
+
+        fillFrameBuffer(input + (frame_idx * HOP_LEN), HOP_LEN);
+        std::memcpy(_fft_buffer + HOP_LEN, _frame_buffer, hop_bytes);
+
+        for (size_t i = 0; i < FRAME_LEN; ++i)
+        {
+            _fft_buffer[i] *= _window_buffer[i];
+        }
+    }
+
+    inline void normalizeGlobally(float *features, size_t size) noexcept
+    {
+        float mean = 0.f;
+        for (size_t i = 0; i < size; ++i)
+        {
+            mean += features[i];
+        }
+        mean /= size;
+
+        float variance = 0.f;
+        for (size_t i = 0; i < size; ++i)
+        {
+            float diff = features[i] - mean;
+            variance += diff * diff;
+        }
+        variance /= size;
+
+        float std_dev = std::sqrtf(variance);
+        float inv_std = 1.f / (std_dev + std::numeric_limits<float>::epsilon());
+        for (size_t i = 0; i < size; ++i)
+        {
+            features[i] = (features[i] - mean) * inv_std;
+        }
+    }
+
+private:
+    dl_fft_f32_t *_fft_handle;
+    float *_fft_buffer;
+    float *_frame_buffer;
+    float *_window_buffer;
+};
+
+} // namespace porting::algorithms::node
+
+#endif
