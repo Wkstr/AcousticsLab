@@ -151,7 +151,6 @@ namespace algorithm { namespace node {
 
             _model_output_classes = static_cast<size_t>(model_output_tensor->shape().dot());
 
-            // Create default tensors if needed
             if (this->inputs().empty())
             {
                 auto input_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Float32,
@@ -167,7 +166,7 @@ namespace algorithm { namespace node {
             if (this->outputs().empty())
             {
                 auto output_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Class,
-                    model_output_tensor->shape());
+                    core::Tensor::Shape(static_cast<int>(_model_output_classes)));
                 if (!output_tensor)
                 {
                     return STATUS(ENOMEM, "Failed to create output tensor");
