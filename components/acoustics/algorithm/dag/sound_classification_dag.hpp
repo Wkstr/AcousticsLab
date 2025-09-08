@@ -9,9 +9,9 @@
 #include "module/module_dag.hpp"
 #include "module/module_node.hpp"
 
-namespace algorithms { namespace dag {
+namespace algorithm { namespace dag {
 
-    inline std::shared_ptr<module::MDAG> createSoundClassification(const core::ConfigMap &configs)
+    static inline std::shared_ptr<module::MDAG> createSoundClassification(const core::ConfigMap &configs)
     {
         auto dag = std::make_shared<module::MDAG>("SoundClassification");
 
@@ -21,7 +21,7 @@ namespace algorithms { namespace dag {
             LOG(ERROR, "SpeechCommands node creation failed");
             return nullptr;
         }
-        auto &inference_inputs = inference_node->inputs();
+        const auto &inference_inputs = inference_node->inputs();
         if (inference_inputs.empty())
         {
             LOG(ERROR, "Inference node has no inputs after initialization");
@@ -34,7 +34,7 @@ namespace algorithms { namespace dag {
             LOG(ERROR, "SpeechCommandsPreprocess node creation failed");
             return nullptr;
         }
-        auto &feature_inputs = feature_node->inputs();
+        const auto &feature_inputs = feature_node->inputs();
         if (feature_inputs.empty())
         {
             LOG(ERROR, "Feature node has no inputs after initialization");
@@ -46,7 +46,7 @@ namespace algorithms { namespace dag {
             LOG(ERROR, "input node creation failed");
             return nullptr;
         }
-        auto &inference_outputs = inference_node->outputs();
+        const auto &inference_outputs = inference_node->outputs();
         if (inference_outputs.empty())
         {
             LOG(ERROR, "Inference node has no outputs after initialization");
@@ -77,6 +77,6 @@ namespace algorithms { namespace dag {
         return dag;
     }
 
-}} // namespace algorithms::dag
+}} // namespace algorithm::dag
 
 #endif // SOUND_CLASSIFICATION_DAG_HPP

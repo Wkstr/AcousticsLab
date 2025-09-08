@@ -10,7 +10,7 @@ void __REGISTER_INTERNAL_MODULE_NODE_BUILDER__()
 {
     // Register SpeechCommandsNode
     auto status = module::MNodeBuilderRegistry::registerNodeBuilder("SpeechCommands",
-        algorithms::node::SpeechCommands::create, false);
+        algorithm::node::SpeechCommands::create, false);
 
     if (!status)
     {
@@ -22,7 +22,7 @@ void __REGISTER_MODULE_DAG_BUILDER__()
 {
     // Register SoundClassificationDAG
     auto status = module::MDAGBuilderRegistry::registerDAGBuilder("SoundClassification",
-        algorithms::dag::createSoundClassification);
+        algorithm::dag::createSoundClassification);
 
     if (!status)
     {

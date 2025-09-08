@@ -13,13 +13,13 @@
 #include <memory>
 #include <string>
 
-namespace algorithms { namespace node {
+namespace algorithm { namespace node {
 
     class SpeechCommands final: public module::MNode
     {
     public:
-        static std::shared_ptr<module::MNode> create(const core::ConfigMap &configs, module::MIOS *inputs,
-            module::MIOS *outputs, int priority)
+        static std::shared_ptr<module::MNode> create(const core::ConfigMap &configs, const module::MIOS *inputs,
+            const module::MIOS *outputs, int priority)
         {
             module::MIOS input_mios = inputs ? *inputs : module::MIOS {};
             module::MIOS output_mios = outputs ? *outputs : module::MIOS {};
@@ -27,7 +27,6 @@ namespace algorithms { namespace node {
             auto validate_status = validateTensors(input_mios, output_mios);
             if (!validate_status)
             {
-                LOG(ERROR, "SpeechCommands tensor validation failed: %s", validate_status.message().c_str());
                 return nullptr;
             }
 
@@ -36,14 +35,12 @@ namespace algorithms { namespace node {
 
             if (!node)
             {
-                LOG(ERROR, "Failed to create SpeechCommands instance");
                 return nullptr;
             }
 
             auto init_status = node->initialize();
             if (!init_status)
             {
-                LOG(ERROR, "Failed to initialize SpeechCommands: %s", init_status.message().c_str());
                 return nullptr;
             }
 
@@ -77,15 +74,11 @@ namespace algorithms { namespace node {
 
             if (input_tensor->dtype() != core::Tensor::Type::Float32)
             {
-                LOG(ERROR, "Input tensor data type mismatch: expected %d, got %d",
-                    static_cast<int>(core::Tensor::Type::Float32), static_cast<int>(input_tensor->dtype()));
                 return STATUS(EINVAL, "Input tensor data type mismatch");
             }
 
             if (output_tensor->dtype() != core::Tensor::Type::Class)
             {
-                LOG(ERROR, "Output tensor data type mismatch: expected %d, got %d",
-                    static_cast<int>(core::Tensor::Type::Class), static_cast<int>(output_tensor->dtype()));
                 return STATUS(EINVAL, "Output tensor data type mismatch");
             }
 
@@ -126,7 +119,7 @@ namespace algorithms { namespace node {
                 auto status = _engine->init();
                 if (!status)
                 {
-                    return STATUS(EFAULT, "Failed to initialize engine");
+                    return status;
                 }
             }
 
@@ -157,6 +150,8 @@ namespace algorithms { namespace node {
             }
 
             _model_output_classes = static_cast<size_t>(model_output_tensor->shape().dot());
+
+            // Create default tensors if needed
             if (this->inputs().empty())
             {
                 auto input_tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Float32,
@@ -166,7 +161,7 @@ namespace algorithms { namespace node {
                     return STATUS(ENOMEM, "Failed to create input tensor");
                 }
                 auto input_mio = std::make_shared<module::MIO>(input_tensor, "feature_input");
-                this->inputs().push_back(input_mio);
+                const_cast<module::MIOS &>(this->inputs()).push_back(input_mio);
             }
 
             if (this->outputs().empty())
@@ -178,7 +173,7 @@ namespace algorithms { namespace node {
                     return STATUS(ENOMEM, "Failed to create output tensor");
                 }
                 auto output_mio = std::make_shared<module::MIO>(output_tensor, "classification_output");
-                this->outputs().push_back(output_mio);
+                const_cast<module::MIOS &>(this->outputs()).push_back(output_mio);
             }
 
             auto tensor_validation_status = validateTensorsWithModel();
@@ -195,14 +190,17 @@ namespace algorithms { namespace node {
             const auto &inputs = this->inputs();
             const auto &outputs = this->outputs();
 
+            if (inputs.empty() || outputs.empty())
+            {
+                return STATUS(EINVAL, "Inputs or outputs are empty");
+            }
+
             const auto &input_tensor = inputs[0]->operator()();
             const auto &output_tensor = outputs[0]->operator()();
 
             auto model_input_tensor = _graph->input(0);
             if (input_tensor->shape().dot() != model_input_tensor->shape().dot())
             {
-                LOG(ERROR, "Input tensor size mismatch: expected %d, got %d", model_input_tensor->shape().dot(),
-                    input_tensor->shape().dot());
                 return STATUS(EINVAL, "Input tensor size mismatch");
             }
 
@@ -212,8 +210,6 @@ namespace algorithms { namespace node {
 
             if (dag_output_size < model_output_size)
             {
-                LOG(ERROR, "Output tensor too small: model needs %zu, DAG provides %zu", model_output_size,
-                    dag_output_size);
                 return STATUS(EINVAL, "Output tensor too small for model output");
             }
             else if (dag_output_size > model_output_size)
@@ -247,8 +243,6 @@ namespace algorithms { namespace node {
             auto status = copyInputData(input_tensor, model_input_tensor);
             status = _graph->forward();
 
-            if (output_tensor->dtype() != core::Tensor::Type::Class)
-                const core::Tensor::Shape new_shape(1, static_cast<int>(_model_output_classes));
             core::class_t *class_data = output_tensor->data<core::class_t>();
             if (model_output_tensor->dtype() == core::Tensor::Type::Float32)
             {
@@ -354,6 +348,6 @@ namespace algorithms { namespace node {
         }
     };
 
-}} // namespace algorithms::node
+}} // namespace algorithm::node
 
 #endif // SPEECH_COMMANDS_NODE_HPP

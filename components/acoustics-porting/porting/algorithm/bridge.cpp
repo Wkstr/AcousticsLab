@@ -1,13 +1,13 @@
 #include "core/logger.hpp"
 #include "module/module_node.hpp"
-#include "node/speech_commands_pre_node.hpp"
+#include "node/speech_commands_preprocess.hpp"
 
 namespace bridge {
 
 void __REGISTER_EXTERNAL_MODULE_NODE_BUILDER__()
 {
     auto status = module::MNodeBuilderRegistry::registerNodeBuilder("SpeechCommandsPreprocess",
-        porting::algorithms::node::SpeechCommandsPreprocess::create, true);
+        porting::algorithm::node::SpeechCommandsPreprocess::create, true);
 
     if (!status)
     {

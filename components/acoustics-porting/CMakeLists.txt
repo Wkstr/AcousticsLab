@@ -71,10 +71,10 @@ file(GLOB_RECURSE ACOUSTICS_SRCS_HAL
     ${CMAKE_CURRENT_LIST_DIR}/../acoustics/hal/*.cpp
 )
 
-file(GLOB_RECURSE ACOUSTICS_SRCS_ALGORITHMS
-    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/algorithms/*.c
-    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/algorithms/*.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/algorithms/*.cpp
+file(GLOB_RECURSE ACOUSTICS_SRCS_ALGORITHM
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/algorithm/*.c
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/algorithm/*.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/algorithm/*.cpp
 )
 
 file(GLOB_RECURSE ACOUSTICS_SRCS_MODULE
@@ -88,7 +88,7 @@ set(ACOUSTICS_SRCS
     ${ACOUSTICS_SRCS_API}
     ${ACOUSTICS_SRCS_CORE}
     ${ACOUSTICS_SRCS_HAL}
-    ${ACOUSTICS_SRCS_ALGORITHMS}
+    ${ACOUSTICS_SRCS_ALGORITHM}
     ${ACOUSTICS_SRCS_MODULE}
 )
 
