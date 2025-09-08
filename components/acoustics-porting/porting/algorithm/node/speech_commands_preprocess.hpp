@@ -1,4 +1,5 @@
 #pragma once
+#if defined(PORTING_LIB_DL_FFT_ENABLE) && PORTING_LIB_DL_FFT_ENABLE
 #ifndef SPEECH_COMMANDS_PREPROCESS_HPP
 #define SPEECH_COMMANDS_PREPROCESS_HPP
 
@@ -19,7 +20,7 @@
 #include <string>
 #include <string_view>
 
-namespace porting::algorithm::node {
+namespace porting::algorithms::node {
 
 class SpeechCommandsPreprocess final: public module::MNode
 {
@@ -274,6 +275,8 @@ private:
     float *_window_buffer;
 };
 
-} // namespace porting::algorithm::node
+} // namespace porting::algorithms::node
 
-#endif
+#endif // SPEECH_COMMANDS_PREPROCESS_HPP
+
+#endif // PORTING_LIB_DL_FFT_ENABLE
