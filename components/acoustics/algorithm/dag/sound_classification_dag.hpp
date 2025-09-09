@@ -13,50 +13,47 @@ namespace algorithm { namespace dag {
 
     static inline std::shared_ptr<module::MDAG> createSoundClassification(const core::ConfigMap &configs)
     {
-        auto dag = std::make_shared<module::MDAG>("SoundClassification");
-
-        auto inference_node = module::MNodeBuilderRegistry::getNode("SpeechCommands", configs, nullptr, nullptr, 2);
+        auto inference_node = module::MNodeBuilderRegistry::getNode("SpeechCommands", configs, nullptr, nullptr);
         if (!inference_node)
         {
-            LOG(ERROR, "SpeechCommands node creation failed");
             return nullptr;
         }
         const auto &inference_inputs = inference_node->inputs();
         if (inference_inputs.empty())
         {
-            LOG(ERROR, "Inference node has no inputs after initialization");
             return nullptr;
         }
         auto feature_node
-            = module::MNodeBuilderRegistry::getNode("SpeechCommandsPreprocess", configs, nullptr, &inference_inputs, 1);
+            = module::MNodeBuilderRegistry::getNode("SpeechCommandsPreprocess", configs, nullptr, &inference_inputs);
         if (!feature_node)
         {
-            LOG(ERROR, "SpeechCommandsPreprocess node creation failed");
             return nullptr;
         }
         const auto &feature_inputs = feature_node->inputs();
         if (feature_inputs.empty())
         {
-            LOG(ERROR, "Feature node has no inputs after initialization");
             return nullptr;
         }
-        auto input_node = module::MNodeBuilderRegistry::getNode("input", configs, &feature_inputs, &feature_inputs, 0);
+        auto input_node = module::MNodeBuilderRegistry::getNode("input", configs, &feature_inputs, &feature_inputs);
         if (!input_node)
         {
-            LOG(ERROR, "input node creation failed");
             return nullptr;
         }
         const auto &inference_outputs = inference_node->outputs();
         if (inference_outputs.empty())
         {
-            LOG(ERROR, "Inference node has no outputs after initialization");
             return nullptr;
         }
         auto output_node
-            = module::MNodeBuilderRegistry::getNode("output", configs, &inference_outputs, &inference_outputs, 3);
+            = module::MNodeBuilderRegistry::getNode("output", configs, &inference_outputs, &inference_outputs);
         if (!output_node)
         {
-            LOG(ERROR, "output node creation failed");
+            return nullptr;
+        }
+
+        auto dag = std::make_shared<module::MDAG>("SoundClassification");
+        if (!dag)
+        {
             return nullptr;
         }
 
@@ -69,11 +66,10 @@ namespace algorithm { namespace dag {
             || !dag->addEdge(feature_node.get(), inference_node.get())
             || !dag->addEdge(inference_node.get(), output_node.get()))
         {
-            LOG(ERROR, "Failed to add edges to DAG");
             return nullptr;
         }
 
-        LOG(INFO, "SoundClassification DAG created successfully");
+        LOG(DEBUG, "SoundClassification DAG created successfully");
         return dag;
     }
 

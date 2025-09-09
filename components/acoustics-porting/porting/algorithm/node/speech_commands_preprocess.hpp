@@ -20,7 +20,7 @@
 #include <string>
 #include <string_view>
 
-namespace porting::algorithms::node {
+namespace porting::algorithm::node {
 
 class SpeechCommandsPreprocess final: public module::MNode
 {
@@ -275,7 +275,7 @@ private:
     float *_window_buffer;
 };
 
-} // namespace porting::algorithms::node
+} // namespace porting::algorithm::node
 
 #endif // SPEECH_COMMANDS_PREPROCESS_HPP
 
