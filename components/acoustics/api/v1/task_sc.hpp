@@ -43,7 +43,7 @@ namespace shared {
     inline std::atomic<bool> is_sampling = false;
     inline std::atomic<bool> is_invoking = false;
 
-    inline constexpr const size_t buffer_size = 102400;
+    inline constexpr const size_t buffer_size = 131072;
     inline constexpr const size_t buffer_size_mask = buffer_size - 1;
     inline std::mutex buffer_mutex;
     inline size_t buffer_head = 0;
@@ -188,7 +188,8 @@ struct TaskSC final
                     const std::lock_guard<std::mutex> lock(v1::shared::buffer_mutex);
                     const size_t head = v1::shared::buffer_head;
                     const size_t tail = v1::shared::buffer_tail;
-                    const size_t next_head = head + shape[0];
+                    const size_t next_head = head + size;
+
                     if (static_cast<size_t>(next_head - tail) > v1::shared::buffer_size) [[unlikely]]
                     {
                         v1::shared::buffer_tail = next_head - v1::shared::buffer_size;
