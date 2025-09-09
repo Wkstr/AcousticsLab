@@ -97,7 +97,7 @@ def _get_concrete_input_shape(model: tf.Module) -> Optional[tuple[int, ...]]:
 def convert(
     tfjs_dir: Path,
     output_tflite: Path,
-    quantize: str = "none",
+    quantize: str,
     rep_data: Optional[Path] = None,
     input_shape_override: Optional[str] = None,
 ) -> Path:
