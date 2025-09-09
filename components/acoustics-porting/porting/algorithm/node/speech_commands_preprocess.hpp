@@ -41,14 +41,14 @@ public:
         auto input_mios = getInputMIOS(inputs);
         if (input_mios.empty())
         {
-            LOG(ERROR, "Failed to get or create input MIOS");
+            LOG(DEBUG, "Failed to get or create input MIOS");
             return {};
         }
 
         auto output_mios = getOutputMIOS(outputs);
         if (output_mios.empty())
         {
-            LOG(ERROR, "Failed to get or create output MIOS");
+            LOG(DEBUG, "Failed to get or create output MIOS");
             return {};
         }
 
@@ -75,7 +75,7 @@ public:
         }
 
     Err:
-        LOG(ERROR, "Failed to allocate resources");
+        LOG(DEBUG, "Failed to allocate resources");
         if (fft_handle)
             dl_rfft_f32_deinit(fft_handle);
         if (fft_buffer)
