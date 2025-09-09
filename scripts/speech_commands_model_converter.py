@@ -151,7 +151,7 @@ def convert(
                 ]
                 concrete_func.inputs[0].set_shape(input_shape)
                 converter = tf.lite.TFLiteConverter.from_concrete_functions(
-                    [concrete_func]
+                    [concrete_func], trackable_obj=model
                 )
                 converter.target_spec.supported_ops = [
                     tf.lite.OpsSet.TFLITE_BUILTINS_INT8
