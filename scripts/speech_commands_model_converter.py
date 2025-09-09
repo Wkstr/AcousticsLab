@@ -54,7 +54,9 @@ def _download_and_extract_preproc_model(dest_dir: Path) -> Path:
             tar.extractall(path=dest_dir)
         os.remove(tar_path)
     except Exception as e:
-        raise RuntimeError(f"Failed to download or extract preprocessing model: {e}") from e
+        raise RuntimeError(
+            f"Failed to download or extract preprocessing model: {e}"
+        ) from e
 
     if not model_path.exists():
         raise RuntimeError(f"Failed to extract model to {model_path}")
@@ -79,7 +81,8 @@ def _collect_audio_files(directory: Path) -> List[Path]:
 
 
 def _make_audio_dataset_generator(
-    wav_dir: Path, preproc_model_path: Path) -> Callable[[], Iterable[list]]:
+    wav_dir: Path, preproc_model_path: Path
+) -> Callable[[], Iterable[list]]:
     def generator() -> Iterable[list]:
         logging.info("--- Starting feature generation from audio for quantization ---")
         try:
@@ -93,7 +96,9 @@ def _make_audio_dataset_generator(
                 selected_files = audio_files
             else:
                 selected_files = random.sample(audio_files, REQUIRED_SAMPLES)
-                logging.info(f"Randomly sampled {len(selected_files)} files for calibration.")
+                logging.info(
+                    f"Randomly sampled {len(selected_files)} files for calibration."
+                )
 
             preproc_model = tf.saved_model.load(str(preproc_model_path))
             inference_func = preproc_model.signatures["serving_default"]
@@ -110,12 +115,16 @@ def _make_audio_dataset_generator(
                     else:
                         data = np.pad(data, (0, target_len - len(data)), "constant")
 
-                    model_input = tf.constant(data.reshape(1, target_len), dtype=input_details.dtype)
+                    model_input = tf.constant(
+                        data.reshape(1, target_len), dtype=input_details.dtype
+                    )
                     result = inference_func(model_input)
                     feature_map = list(result.values())[0].numpy()
                     yield [feature_map.astype(np.float32)]
                 except Exception as e:
-                    logging.warning(f"Could not process '{audio_path.name}': {e}. Skipping.")
+                    logging.warning(
+                        f"Could not process '{audio_path.name}': {e}. Skipping."
+                    )
                     continue
         except Exception as e:
             logging.error(f"Fatal error during feature generation: {e}")
@@ -142,7 +151,9 @@ def convert(
     with tempfile.TemporaryDirectory(prefix="tfjs2tflite_") as tmpdir:
         saved_model_dir = Path(tmpdir) / "saved_model"
 
-        logging.info(f"--- Step 1: Converting {tfjs_model_path} to SavedModel format ---")
+        logging.info(
+            f"--- Step 1: Converting {tfjs_model_path} to SavedModel format ---"
+        )
         try:
             dispatch_tensorflowjs_to_keras_saved_model_conversion(
                 str(tfjs_model_path), str(saved_model_dir)
@@ -151,28 +162,34 @@ def convert(
         except Exception as e:
             raise RuntimeError(f"Failed to convert TF.js to SavedModel: {e}") from e
 
-        logging.info(f"--- Step 2: Converting to TFLite with '{quantize}' quantization ---")
+        logging.info(
+            f"--- Step 2: Converting to TFLite with '{quantize}' quantization ---"
+        )
         converter = tf.lite.TFLiteConverter.from_saved_model(str(saved_model_dir))
         converter.optimizations = [tf.lite.Optimize.DEFAULT]
 
         if quantize == "float16":
             converter.target_spec.supported_types = [tf.float16]
             logging.info("Enabled float16 quantization.")
-        
+
         elif quantize == "int8":
             if not wav_dir or not wav_dir.is_dir():
-                raise ValueError(f"For 'int8' quantization, a valid --wav-dir is required.")
-            
+                raise ValueError(
+                    "For 'int8' quantization, a valid --wav-dir is required."
+                )
+
             preproc_cache_dir = Path(tmpdir) / "preproc_model_cache"
             preproc_model_path = _download_and_extract_preproc_model(preproc_cache_dir)
-            
+
             converter.representative_dataset = _make_audio_dataset_generator(
                 wav_dir, preproc_model_path
             )
             converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
             converter.inference_input_type = tf.int8
             converter.inference_output_type = tf.int8
-            logging.info("Enabled full integer (int8) quantization using audio dataset.")
+            logging.info(
+                "Enabled full integer (int8) quantization using audio dataset."
+            )
 
         elif quantize == "dynamic":
             logging.info("Enabled dynamic range quantization.")
@@ -229,15 +246,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         logging.info(f"   - TF.js Source: {args.tfjs_dir}")
         logging.info(f"   - TFLite Output: {args.output}")
         logging.info(f"   - Quantization: {args.quantize}")
-        if args.quantize == 'int8':
+        if args.quantize == "int8":
             logging.info(f"   - Audio Data for Calibration: {args.wav_dir}")
-        
-        out_path = convert(
-            args.tfjs_dir, args.output, args.quantize, args.wav_dir
-        )
+
+        out_path = convert(args.tfjs_dir, args.output, args.quantize, args.wav_dir)
         size_kb = os.path.getsize(out_path) / 1024.0
         logging.info("=" * 50)
-        logging.info(f"Conversion successful!")
+        logging.info("Conversion successful!")
         logging.info(f"   - Output model: {out_path} ({size_kb:.1f} KB)")
         logging.info("=" * 50)
 
