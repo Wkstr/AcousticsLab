@@ -1,14 +1,13 @@
 #include "core/logger.hpp"
-#include "dag/sound_classification_dag.hpp"
+#include "dag/sound_classification.hpp"
 #include "module/module_dag.hpp"
 #include "module/module_node.hpp"
-#include "node/speech_commands_node.hpp"
+#include "node/speech_commands_inference.hpp"
 
 namespace bridge {
 
 void __REGISTER_INTERNAL_MODULE_NODE_BUILDER__()
 {
-    // Register SpeechCommandsNode
     auto status = module::MNodeBuilderRegistry::registerNodeBuilder("SpeechCommands",
         algorithm::node::SpeechCommands::create, false);
 
@@ -20,7 +19,6 @@ void __REGISTER_INTERNAL_MODULE_NODE_BUILDER__()
 
 void __REGISTER_MODULE_DAG_BUILDER__()
 {
-    // Register SoundClassificationDAG
     auto status = module::MDAGBuilderRegistry::registerDAGBuilder("SoundClassification",
         algorithm::dag::createSoundClassification);
 

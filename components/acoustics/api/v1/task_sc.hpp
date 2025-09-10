@@ -43,7 +43,7 @@ namespace shared {
     inline std::atomic<bool> is_sampling = false;
     inline std::atomic<bool> is_invoking = false;
 
-    inline constexpr const size_t buffer_size = 102400;
+    inline constexpr const size_t buffer_size = 131072;
     inline constexpr const size_t buffer_size_mask = buffer_size - 1;
     inline std::mutex buffer_mutex;
     inline size_t buffer_head = 0;
