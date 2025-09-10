@@ -38,71 +38,49 @@ public:
 
         hal::Engine *engine = hal::EngineRegistry::getEngine(1);
         if (!engine)
-        {
             return {};
-        }
 
         if (!engine->initialized())
         {
             auto status = engine->init();
             if (!status)
-            {
                 return {};
-            }
         }
 
         auto model_info = engine->modelInfo([](const core::Model::Info &info) { return info.id == 1; });
         if (!model_info)
-        {
             return {};
-        }
 
         std::shared_ptr<core::Model> model;
         auto status = engine->loadModel(model_info, model);
         if (!status)
-        {
             return {};
-        }
 
         auto graph = model->graph(0);
         if (!graph)
-        {
             return {};
-        }
 
         auto model_input_tensor = graph->input(0);
         auto model_output_tensor = graph->output(0);
         if (!model_input_tensor || !model_output_tensor)
-        {
             return {};
-        }
 
         if (!postModelValidateInputTensor(model_input_tensor))
-        {
             return {};
-        }
         if (!postModelValidateOutputTensor(model_output_tensor))
-        {
             return {};
-        }
 
-        size_t model_output_classes = static_cast<size_t>(model_output_tensor->shape()[1]);
+        const size_t model_output_classes = static_cast<size_t>(model_output_tensor->shape()[1]);
         if (outputs && !validateUserOutputWithModel(*outputs, model_output_classes))
-        {
             return {};
-        }
 
         auto input_mios = inputs ? *inputs : createInputMIOS(model_input_tensor);
         if (input_mios.empty())
-        {
             return {};
-        }
 
         auto output_mios = outputs ? *outputs : createOutputMIOS(model_output_classes);
         if (output_mios.empty())
-        {
             return {};
-        }
 
         std::shared_ptr<module::MNode> node(new SpeechCommands(configs, std::move(input_mios), std::move(output_mios),
             priority, model, graph, model_output_classes));
@@ -112,7 +90,7 @@ public:
     inline ~SpeechCommands() noexcept override = default;
 
 private:
-    static inline const core::Tensor::Shape _kExpectedInputShape = { 1, 43, 232, 1 };
+    static inline const core::Tensor::Shape EXPECTED_INPUT_SHAPE = { 1, 43, 232, 1 };
 
     static bool preliminaryValidateInputMIOS(const module::MIOS &inputs) noexcept
     {
@@ -124,20 +102,15 @@ private:
         auto *tensor = mio->operator()();
         if (!tensor || !tensor->data() || tensor->dtype() != core::Tensor::Type::Float32)
             return false;
-        return tensor->shape() == _kExpectedInputShape;
+        return tensor->shape() == EXPECTED_INPUT_SHAPE;
     }
 
     static bool postModelValidateInputTensor(core::Tensor *model_input_tensor) noexcept
     {
         if (model_input_tensor->dtype() != core::Tensor::Type::Int8)
-        {
             return false;
-        }
-        if (model_input_tensor->shape() != _kExpectedInputShape)
-        {
-            LOG(DEBUG, "Loaded model's input shape mismatch. Expected [1, 43, 232, 1].");
+        if (model_input_tensor->shape() != EXPECTED_INPUT_SHAPE)
             return false;
-        }
         return true;
     }
 
@@ -151,23 +124,22 @@ private:
         auto *tensor = mio->operator()();
         if (!tensor || tensor->dtype() != core::Tensor::Type::Class)
             return false;
-        return tensor->shape().size() == 1;
+        return tensor->shape().size() == 1 && tensor->shape()[0] >= 1;
     }
 
     static bool postModelValidateOutputTensor(core::Tensor *model_output_tensor) noexcept
     {
         const auto &shape = model_output_tensor->shape();
-        if (shape.size() != 2 || shape[0] < 1 || shape[1] < 1)
-        {
+        if (model_output_tensor->dtype() != core::Tensor::Type::Int8 || shape.size() != 2 || shape[0] != 1
+            || shape[1] < 1)
             return false;
-        }
         return true;
     }
 
     static bool validateUserOutputWithModel(const module::MIOS &outputs, size_t model_output_classes) noexcept
     {
         auto *tensor = outputs[0]->operator()();
-        if (static_cast<size_t>(tensor->shape()[1]) != model_output_classes)
+        if (tensor->shape()[1] != static_cast<int>(model_output_classes))
         {
             return false;
         }
@@ -223,31 +195,16 @@ private:
             return status;
 
         core::class_t *class_data = output_tensor->data<core::class_t>();
-        if (model_output_tensor->dtype() == core::Tensor::Type::Float32)
-        {
-            const float *model_data = model_output_tensor->data<float>();
-            for (size_t i = 0; i < _model_output_classes; ++i)
-            {
-                class_data[i] = { static_cast<int>(i), model_data[i] };
-            }
-        }
-        else if (model_output_tensor->dtype() == core::Tensor::Type::Int8)
-        {
-            const int8_t *model_data = model_output_tensor->data<int8_t>();
-            auto quant_params = _graph->outputQuantParams(0);
-            float scale = quant_params.scale();
-            int32_t zero_point = quant_params.zeroPoint();
+        const int8_t *model_data = model_output_tensor->data<int8_t>();
+        auto quant_params = _graph->outputQuantParams(0);
+        float scale = quant_params.scale();
+        int32_t zero_point = quant_params.zeroPoint();
 
-            for (size_t i = 0; i < _model_output_classes; ++i)
-            {
-                float confidence = static_cast<float>(model_data[i] - zero_point) * scale;
-                confidence = std::clamp(confidence, 0.0f, 1.0f);
-                class_data[i] = { static_cast<int>(i), confidence };
-            }
-        }
-        else
+        for (size_t i = 0; i < _model_output_classes; ++i)
         {
-            return STATUS(ENOTSUP, "Unsupported model output tensor data type");
+            float confidence = static_cast<float>(model_data[i] - zero_point) * scale;
+            confidence = std::clamp(confidence, 0.0f, 1.0f);
+            class_data[i] = { static_cast<int>(i), confidence };
         }
 
         return STATUS_OK();
@@ -255,55 +212,23 @@ private:
 
     inline core::Status copyInputData(core::Tensor *input_tensor, core::Tensor *model_input_tensor) const noexcept
     {
+        int8_t *model_data = model_input_tensor->data<int8_t>();
+        if (!model_data)
+            return STATUS(EFAULT, "Failed to get model input data pointer");
+
         const size_t elements_to_process = static_cast<size_t>(input_tensor->shape().dot());
+        auto input_quant_params = _graph->inputQuantParams(0);
+        float scale = input_quant_params.scale();
+        int32_t zero_point = input_quant_params.zeroPoint();
 
-        if (model_input_tensor->dtype() == core::Tensor::Type::Float32)
+        const float *input_data = input_tensor->data<float>();
+        const float inv_scale = 1.0f / scale;
+        for (size_t i = 0; i < elements_to_process; ++i)
         {
-            float *model_data = model_input_tensor->data<float>();
-            if (!model_data)
-                return STATUS(EFAULT, "Failed to get model input data pointer");
-
-            if (input_tensor->dtype() == core::Tensor::Type::Float32)
-            {
-                const float *input_data = input_tensor->data<float>();
-                if (!input_data)
-                    return STATUS(EFAULT, "Failed to get input data pointer");
-                std::memcpy(model_data, input_data, elements_to_process * sizeof(float));
-            }
-            else
-            {
-                return STATUS(ENOTSUP, "Unsupported input tensor data type for float32 model");
-            }
+            int32_t quantized_value = static_cast<int32_t>((input_data[i] * inv_scale)) + zero_point;
+            model_data[i] = static_cast<int8_t>(quantized_value);
         }
-        else if (model_input_tensor->dtype() == core::Tensor::Type::Int8)
-        {
-            int8_t *model_data = model_input_tensor->data<int8_t>();
-            if (!model_data)
-                return STATUS(EFAULT, "Failed to get model input data pointer");
 
-            auto input_quant_params = _graph->inputQuantParams(0);
-            float scale = input_quant_params.scale();
-            int32_t zero_point = input_quant_params.zeroPoint();
-
-            if (input_tensor->dtype() == core::Tensor::Type::Float32)
-            {
-                const float *input_data = input_tensor->data<float>();
-                const float inv_scale = 1.0f / scale;
-                for (size_t i = 0; i < elements_to_process; ++i)
-                {
-                    int32_t quantized_value = static_cast<int32_t>((input_data[i] * inv_scale)) + zero_point;
-                    model_data[i] = static_cast<int8_t>(quantized_value);
-                }
-            }
-            else
-            {
-                return STATUS(ENOTSUP, "Unsupported input tensor data type for int8 model");
-            }
-        }
-        else
-        {
-            return STATUS(ENOTSUP, "Unsupported model input tensor data type");
-        }
         return STATUS_OK();
     }
 
