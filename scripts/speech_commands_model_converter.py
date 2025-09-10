@@ -25,7 +25,7 @@ logging.basicConfig(
 
 CWD = Path.cwd()
 DEFAULT_TFJS_MODEL = CWD / "tm-my-audio-model"
-DEFAULT_WAV_INPUT_DIR = CWD / "datasound"
+DEFAULT_WAV_INPUT_DIR = CWD / "calibration_audio"
 DEFAULT_OUT_MODEL = CWD / "tm-my-audio-model.tflite"
 REQUIRED_SAMPLES = 100
 
