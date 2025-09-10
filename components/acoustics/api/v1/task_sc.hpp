@@ -188,7 +188,8 @@ struct TaskSC final
                     const std::lock_guard<std::mutex> lock(v1::shared::buffer_mutex);
                     const size_t head = v1::shared::buffer_head;
                     const size_t tail = v1::shared::buffer_tail;
-                    const size_t next_head = head + shape[0];
+                    const size_t next_head = head + size;
+
                     if (static_cast<size_t>(next_head - tail) > v1::shared::buffer_size) [[unlikely]]
                     {
                         v1::shared::buffer_tail = next_head - v1::shared::buffer_size;
