@@ -215,11 +215,11 @@ struct TaskSC final
                 }
             }
 
-            // status = replyWithStatus(status, df_ts, encoder_writer);
-            // if (!status) [[unlikely]]
-            // {
-            //     return status;
-            // }
+            status = replyWithStatus(status, df_ts, encoder_writer);
+            if (!status) [[unlikely]]
+            {
+                return status;
+            }
 
             return executor.submit(getptr(), getNextDataDelay(_sensor->dataAvailable()));
         }

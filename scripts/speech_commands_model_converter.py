@@ -1,13 +1,14 @@
 import argparse
+import os
+import sys
+import tempfile
+from pathlib import Path
+from typing import Callable, Iterable, Optional
 import logging
 import mimetypes
-import os
 import random
 import tarfile
-import tempfile
 import urllib.request
-from pathlib import Path
-from typing import Callable, Iterable, Optional, List
 
 import librosa
 import numpy as np
@@ -22,34 +23,26 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-
-_SCRIPT_DIR = Path(__file__).parent.resolve()
-_PROJECT_ROOT = _SCRIPT_DIR.parent
-DEFAULT_TFJS_MODEL_DIR = _PROJECT_ROOT / "tm-my-audio-model"
-DEFAULT_WAV_INPUT_DIR = _PROJECT_ROOT / "datasound"
-DEFAULT_TFLITE_OUTPUT_PATH = _PROJECT_ROOT / "tm-my-audio-model.tflite"
+CWD = Path.cwd()
+DEFAULT_TFJS_MODEL = CWD / "tm-my-audio-model"
+DEFAULT_WAV_INPUT_DIR = CWD / "datasound"
+DEFAULT_OUT_MODEL = CWD / "tm-my-audio-model.tflite"
 REQUIRED_SAMPLES = 100
 
 
 def _download_and_extract_preproc_model(dest_dir: Path) -> Path:
     PREPROC_MODEL_URL = "https://storage.googleapis.com/tfjs-models/tfjs/speech-commands/conversion/sc_preproc_model.tar.gz"
     MODEL_DIR_NAME = "sc_preproc_model"
-
-    dest_dir.mkdir(parents=True, exist_ok=True)
     model_path = dest_dir / MODEL_DIR_NAME
 
     if model_path.exists():
         logging.info(f"Preprocessing model found at {model_path}")
         return model_path
 
-    logging.info(
-        f"Preprocessing model not found. Downloading from {PREPROC_MODEL_URL}..."
-    )
+    logging.info(f"Downloading preprocessing model from {PREPROC_MODEL_URL}...")
+    dest_dir.mkdir(parents=True, exist_ok=True)
     try:
         tar_path, _ = urllib.request.urlretrieve(PREPROC_MODEL_URL)
-        logging.info(f"Downloaded to temporary file: {tar_path}")
-
-        logging.info(f"Extracting to {dest_dir}...")
         with tarfile.open(tar_path, "r:gz") as tar:
             tar.extractall(path=dest_dir)
         os.remove(tar_path)
@@ -58,150 +51,188 @@ def _download_and_extract_preproc_model(dest_dir: Path) -> Path:
             f"Failed to download or extract preprocessing model: {e}"
         ) from e
 
-    if not model_path.exists():
-        raise RuntimeError(f"Failed to extract model to {model_path}")
-
-    logging.info(
-        f"Successfully downloaded and extracted preprocessing model to {model_path}"
-    )
+    logging.info(f"Successfully extracted preprocessing model to {model_path}")
     return model_path
 
 
-def _collect_audio_files(directory: Path) -> List[Path]:
-    audio_files = []
-    logging.info(f"Scanning for audio files in {directory}...")
-    for file_path in directory.iterdir():
-        mime_type, _ = mimetypes.guess_type(str(file_path))
-        is_audio = mime_type and mime_type.startswith("audio/")
-        if file_path.is_file() and is_audio:
-            audio_files.append(file_path)
-    if not audio_files:
-        raise FileNotFoundError(f"No audio files found in directory: {directory}")
-    return sorted(audio_files)
+def _resolve_tfjs_input_path(tfjs_path: Path) -> Path:
+    if tfjs_path.is_dir():
+        cand = tfjs_path / "model.json"
+        if cand.exists():
+            return cand
+        raise FileNotFoundError(f"model.json not found in {tfjs_path}")
+    if tfjs_path.name == "model.json" and tfjs_path.exists():
+        return tfjs_path
+    raise FileNotFoundError(
+        f"Expected a TFJS layers model directory (with model.json) or a model.json file, got: {tfjs_path}"
+    )
 
 
-def _make_audio_dataset_generator(
-    wav_dir: Path, preproc_model_path: Path
+def _run_tfjs_to_saved_model(tfjs_model_path_or_dir: Path, saved_model_out_dir: Path):
+    model_json = _resolve_tfjs_input_path(tfjs_model_path_or_dir)
+    saved_model_out_dir.parent.mkdir(parents=True, exist_ok=True)
+    dispatch_tensorflowjs_to_keras_saved_model_conversion(
+        str(model_json),
+        str(saved_model_out_dir),
+    )
+    if not saved_model_out_dir.exists():
+        print(f"ERROR: SavedModel not found at {saved_model_out_dir}", file=sys.stderr)
+        raise FileNotFoundError(saved_model_out_dir)
+
+
+def _make_representative_dataset_generator(
+    input_shape: tuple[int, ...], wav_dir: Optional[Path]
 ) -> Callable[[], Iterable[list]]:
     def generator() -> Iterable[list]:
-        logging.info("--- Starting feature generation from audio for quantization ---")
-        try:
-            audio_files = _collect_audio_files(wav_dir)
-            logging.info(f"Found {len(audio_files)} audio files.")
-
-            if len(audio_files) < REQUIRED_SAMPLES:
-                logging.warning(
-                    f"Found {len(audio_files)} audio files, but at least {REQUIRED_SAMPLES} are recommended for robust quantization."
-                )
-                selected_files = audio_files
-            else:
-                selected_files = random.sample(audio_files, REQUIRED_SAMPLES)
-                logging.info(
-                    f"Randomly sampled {len(selected_files)} files for calibration."
-                )
-
+        if not wav_dir or not wav_dir.is_dir():
+            raise FileNotFoundError(
+                f"For 'int8' quantization, a directory with WAV files is required. "
+                f"Please provide a valid path using the --wav-dir argument. Path given: {wav_dir}"
+            )
+        logging.info("Generating features from audio for INT8 quantization")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            preproc_model_path = _download_and_extract_preproc_model(Path(tmpdir))
             preproc_model = tf.saved_model.load(str(preproc_model_path))
             inference_func = preproc_model.signatures["serving_default"]
-            input_details = inference_func.inputs[0]
-            target_len = input_details.shape[1]
-            target_sr = 44100
 
-            for audio_path in selected_files:
-                try:
-                    data, _ = librosa.load(str(audio_path), sr=target_sr, mono=True)
-                    if len(data) > target_len:
-                        start = (len(data) - target_len) // 2
-                        data = data[start : start + target_len]
-                    else:
-                        data = np.pad(data, (0, target_len - len(data)), "constant")
+        audio_files = [
+            p
+            for p in wav_dir.iterdir()
+            if p.is_file()
+            and (mtype := mimetypes.guess_type(p)[0])
+            and mtype.startswith("audio/")
+        ]
 
-                    model_input = tf.constant(
-                        data.reshape(1, target_len), dtype=input_details.dtype
-                    )
-                    result = inference_func(model_input)
-                    feature_map = list(result.values())[0].numpy()
-                    yield [feature_map.astype(np.float32)]
-                except Exception as e:
+        if not audio_files:
+            raise FileNotFoundError(f"No audio files found in directory: {wav_dir}")
+
+        logging.info(f"Found {len(audio_files)} audio files.")
+        num_samples = min(len(audio_files), REQUIRED_SAMPLES)
+        selected_files = random.sample(audio_files, num_samples)
+        logging.info(f"Using {len(selected_files)} files for calibration.")
+
+        target_len = 44032
+        target_sr = 44100
+
+        for audio_path in selected_files:
+            try:
+                data, _ = librosa.load(str(audio_path), sr=target_sr, mono=True)
+                if len(data) > target_len:
+                    start = (len(data) - target_len) // 2
+                    data = data[start : start + target_len]
+                else:
+                    data = np.pad(data, (0, target_len - len(data)), "constant")
+
+                result = inference_func(
+                    tf.constant(data.reshape(1, target_len), dtype=tf.float32)
+                )
+                feature_map = list(result.values())[0]
+
+                if feature_map.shape != input_shape:
                     logging.warning(
-                        f"Could not process '{audio_path.name}': {e}. Skipping."
+                        f"Feature shape {feature_map.shape} != model shape {input_shape}. Skipping {audio_path.name}"
                     )
                     continue
-        except Exception as e:
-            logging.error(f"Fatal error during feature generation: {e}")
-            logging.error("Falling back to synthetic random data for calibration.")
-            for _ in range(REQUIRED_SAMPLES):
-                yield [np.random.rand(1, 43, 232, 1).astype(np.float32)]
+
+                yield [feature_map.numpy().astype(np.float32)]
+            except Exception as e:
+                logging.warning(
+                    f"Could not process '{audio_path.name}': {e}. Skipping."
+                )
+                continue
 
     return generator
+
+
+def _get_concrete_input_shape(model: tf.Module) -> Optional[tuple[int, ...]]:
+    concrete = None
+    signatures = model.signatures
+    if "serving_default" in signatures:
+        concrete = signatures["serving_default"]
+    elif len(signatures) > 0:
+        concrete = next(iter(signatures.values()))
+    if concrete is not None and concrete.inputs:
+        tshape = concrete.inputs[0].shape.as_list()
+        if tshape and tshape[0] is None:
+            tshape[0] = 1
+        return tuple(int(x) for x in tshape)
+    return None
 
 
 def convert(
     tfjs_dir: Path,
     output_tflite: Path,
-    quantize: str = "dynamic",
+    quantize: str,
     wav_dir: Optional[Path] = None,
+    input_shape_override: Optional[str] = None,
 ) -> Path:
-    tfjs_model_path = tfjs_dir / "model.json"
-    if not tfjs_model_path.exists():
+    tfjs_dir = tfjs_dir.resolve()
+    if not (tfjs_dir / "model.json").exists():
         raise FileNotFoundError(f"model.json not found in {tfjs_dir}")
-
     output_tflite = output_tflite.resolve()
+    converter = None
+    model = None
     quantize = quantize.lower().strip()
-
     with tempfile.TemporaryDirectory(prefix="tfjs2tflite_") as tmpdir:
         saved_model_dir = Path(tmpdir) / "saved_model"
 
-        logging.info(
-            f"--- Step 1: Converting {tfjs_model_path} to SavedModel format ---"
-        )
-        try:
-            dispatch_tensorflowjs_to_keras_saved_model_conversion(
-                str(tfjs_model_path), str(saved_model_dir)
-            )
-            logging.info(f"SavedModel created at {saved_model_dir}")
-        except Exception as e:
-            raise RuntimeError(f"Failed to convert TF.js to SavedModel: {e}") from e
+    try:
+        _run_tfjs_to_saved_model(tfjs_dir, saved_model_dir)
+        model = tf.saved_model.load(str(saved_model_dir))
 
-        logging.info(
-            f"--- Step 2: Converting to TFLite with '{quantize}' quantization ---"
-        )
-        converter = tf.lite.TFLiteConverter.from_saved_model(str(saved_model_dir))
-        converter.optimizations = [tf.lite.Optimize.DEFAULT]
-
-        if quantize == "float16":
-            converter.target_spec.supported_types = [tf.float16]
-            logging.info("Enabled float16 quantization.")
-
-        elif quantize == "int8":
-            if not wav_dir or not wav_dir.is_dir():
-                raise ValueError(
-                    "For 'int8' quantization, a valid --wav-dir is required."
+        match quantize:
+            case "dynamic":
+                converter = tf.lite.TFLiteConverter.from_saved_model(
+                    str(saved_model_dir)
                 )
 
-            preproc_cache_dir = Path(tmpdir) / "preproc_model_cache"
-            preproc_model_path = _download_and_extract_preproc_model(preproc_cache_dir)
+            case "float16":
+                converter = tf.lite.TFLiteConverter.from_saved_model(
+                    str(saved_model_dir)
+                )
+                converter.target_spec.supported_types = [tf.float16]
 
-            converter.representative_dataset = _make_audio_dataset_generator(
-                wav_dir, preproc_model_path
-            )
-            converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-            converter.inference_input_type = tf.int8
-            converter.inference_output_type = tf.int8
-            logging.info(
-                "Enabled full integer (int8) quantization using audio dataset."
-            )
+            case "int8":
+                input_shape = _get_concrete_input_shape(model)
+                if input_shape_override:
+                    dims = tuple(
+                        int(x.strip())
+                        for x in input_shape_override.split(",")
+                        if x.strip()
+                    )
+                    if len(dims) == 0:
+                        raise ValueError("--input-shape provided but empty")
+                    if dims[0] != 1:
+                        dims = (1,) + dims
+                    input_shape = dims
+                if input_shape is None:
+                    raise ValueError("Could not automatically infer model input shape")
+                concrete_func = model.signatures[
+                    tf.saved_model.DEFAULT_SERVING_SIGNATURE_DEF_KEY
+                ]
+                concrete_func.inputs[0].set_shape(input_shape)
+                converter = tf.lite.TFLiteConverter.from_concrete_functions(
+                    [concrete_func], trackable_obj=model
+                )
+                converter.representative_dataset = (
+                    _make_representative_dataset_generator(input_shape, wav_dir)
+                )
+                converter.target_spec.supported_ops = [
+                    tf.lite.OpsSet.TFLITE_BUILTINS_INT8
+                ]
+                converter.inference_input_type = tf.int8
+                converter.inference_output_type = tf.int8
 
-        elif quantize == "dynamic":
-            logging.info("Enabled dynamic range quantization.")
+            case _:
+                raise ValueError(f"Unsupported quantization mode: {quantize}")
 
-        else:
-            raise ValueError(f"Unsupported quantization mode: {quantize}")
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to convert TFJS model to TFLite model due to: {e}"
+        ) from e
 
-        try:
-            tflite_model = converter.convert()
-            logging.info("TFLite conversion successful.")
-        except Exception as e:
-            raise RuntimeError(f"TFLite conversion failed: {e}") from e
+    converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    tflite_model = converter.convert()
 
     output_tflite.parent.mkdir(parents=True, exist_ok=True)
     with open(output_tflite, "wb") as f:
@@ -217,26 +248,32 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument(
         "--tfjs-dir",
         type=Path,
-        default=DEFAULT_TFJS_MODEL_DIR,
-        help=f"Directory with model.json, metadata.json, and weights.bin. Default: {DEFAULT_TFJS_MODEL_DIR}",
+        default=DEFAULT_TFJS_MODEL,
+        help="Directory with model.json and weights.bin",
     )
     p.add_argument(
         "--output",
         type=Path,
-        default=DEFAULT_TFLITE_OUTPUT_PATH,
-        help=f"Output .tflite file path. Default: {DEFAULT_TFLITE_OUTPUT_PATH}",
+        default=DEFAULT_OUT_MODEL,
+        help="Output .tflite file path",
     )
     p.add_argument(
         "--quantize",
         choices=["dynamic", "float16", "int8"],
         default="int8",
-        help="Quantization mode. 'int8' is recommended for MCUs. Default: int8",
+        help="Quantization mode (default: int8)",
     )
     p.add_argument(
         "--wav-dir",
         type=Path,
         default=DEFAULT_WAV_INPUT_DIR,
-        help=f"Directory of .wav files for 'int8' quantization calibration. Default: {DEFAULT_WAV_INPUT_DIR}",
+        help="Directory of .wav files for 'int8' quantization calibration. If not provided, random data will be used.",
+    )
+    p.add_argument(
+        "--input-shape",
+        type=str,
+        default=None,
+        help="Comma-separated input shape excluding batch, e.g. '43,232,1'",
     )
 
     args = p.parse_args(argv)
@@ -247,15 +284,20 @@ def main(argv: Optional[list[str]] = None) -> int:
         logging.info(f"   - TFLite Output: {args.output}")
         logging.info(f"   - Quantization: {args.quantize}")
         if args.quantize == "int8":
-            logging.info(f"   - Audio Data for Calibration: {args.wav_dir}")
+            logging.info(f"   - Calibration Data: {args.wav_dir}")
 
-        out_path = convert(args.tfjs_dir, args.output, args.quantize, args.wav_dir)
-        size_kb = os.path.getsize(out_path) / 1024.0
+        out = convert(
+            args.tfjs_dir,
+            args.output,
+            args.quantize,
+            wav_dir=args.wav_dir,
+            input_shape_override=args.input_shape,
+        )
+        size_kb = os.path.getsize(out) / 1024.0
         logging.info("=" * 50)
         logging.info("Conversion successful!")
-        logging.info(f"   - Output model: {out_path} ({size_kb:.1f} KB)")
+        logging.info(f"   - Output: {out} ({size_kb:.1f} KB)")
         logging.info("=" * 50)
-
     except (FileNotFoundError, ValueError, RuntimeError) as e:
         logging.error(f"ERROR: {e}")
         return 1
