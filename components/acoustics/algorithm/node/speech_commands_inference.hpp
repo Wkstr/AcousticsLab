@@ -1,6 +1,6 @@
 #pragma once
-#ifndef SPEECH_COMMANDS_inference_HPP
-#define SPEECH_COMMANDS_inference_HPP
+#ifndef SPEECH_COMMANDS_INFERENCE_HPP
+#define SPEECH_COMMANDS_INFERENCE_HPP
 
 #include "core/config_object.hpp"
 #include "core/logger.hpp"
@@ -10,6 +10,7 @@
 #include "hal/engine.hpp"
 #include "module/module_node.hpp"
 
+#include <algorithm>
 #include <memory>
 #include <string>
 
@@ -25,13 +26,13 @@ public:
     {
         if (inputs && !preliminaryValidateInputMIOS(*inputs))
         {
-            LOG(ERROR, "User-provided input MIOS validation failed: shape or type mismatch.");
+            LOG(DEBUG, "User-provided input MIOS validation failed: shape or type mismatch.");
             return {};
         }
 
         if (outputs && !preliminaryValidateOutputMIOS(*outputs))
         {
-            LOG(ERROR, "User-provided output MIOS validation failed: must be a 1D Class tensor.");
+            LOG(DEBUG, "User-provided output MIOS validation failed: shape or type mismatch.");
             return {};
         }
 
@@ -85,7 +86,7 @@ public:
             return {};
         }
 
-        size_t model_output_classes = static_cast<size_t>(model_output_tensor->shape().dot());
+        size_t model_output_classes = static_cast<size_t>(model_output_tensor->shape()[1]);
         if (outputs && !validateUserOutputWithModel(*outputs, model_output_classes))
         {
             return {};
@@ -108,20 +109,10 @@ public:
         return node;
     }
 
-    inline ~SpeechCommands() noexcept override
-    {
-        if (_graph)
-        {
-            _graph.reset();
-        }
-        if (_model)
-        {
-            _model.reset();
-        }
-    }
+    inline ~SpeechCommands() noexcept override = default;
 
 private:
-    static inline const core::Tensor::Shape kExpectedInputShape = { 1, 43, 232, 1 };
+    static inline const core::Tensor::Shape _kExpectedInputShape = { 1, 43, 232, 1 };
 
     static bool preliminaryValidateInputMIOS(const module::MIOS &inputs) noexcept
     {
@@ -133,14 +124,18 @@ private:
         auto *tensor = mio->operator()();
         if (!tensor || !tensor->data() || tensor->dtype() != core::Tensor::Type::Float32)
             return false;
-        return tensor->shape() == kExpectedInputShape;
+        return tensor->shape() == _kExpectedInputShape;
     }
 
     static bool postModelValidateInputTensor(core::Tensor *model_input_tensor) noexcept
     {
-        if (model_input_tensor->shape() != kExpectedInputShape)
+        if (model_input_tensor->dtype() != core::Tensor::Type::Int8)
         {
-            LOG(ERROR, "Loaded model's input shape mismatch. Expected [1, 43, 232, 1].");
+            return false;
+        }
+        if (model_input_tensor->shape() != _kExpectedInputShape)
+        {
+            LOG(DEBUG, "Loaded model's input shape mismatch. Expected [1, 43, 232, 1].");
             return false;
         }
         return true;
@@ -162,7 +157,7 @@ private:
     static bool postModelValidateOutputTensor(core::Tensor *model_output_tensor) noexcept
     {
         const auto &shape = model_output_tensor->shape();
-        if (shape.size() != 2 || shape[0] != 1)
+        if (shape.size() != 2 || shape[0] < 1 || shape[1] < 1)
         {
             return false;
         }
@@ -172,7 +167,7 @@ private:
     static bool validateUserOutputWithModel(const module::MIOS &outputs, size_t model_output_classes) noexcept
     {
         auto *tensor = outputs[0]->operator()();
-        if (static_cast<size_t>(tensor->shape().dot()) != model_output_classes)
+        if (static_cast<size_t>(tensor->shape()[1]) != model_output_classes)
         {
             return false;
         }
@@ -246,6 +241,7 @@ private:
             for (size_t i = 0; i < _model_output_classes; ++i)
             {
                 float confidence = static_cast<float>(model_data[i] - zero_point) * scale;
+                confidence = std::clamp(confidence, 0.0f, 1.0f);
                 class_data[i] = { static_cast<int>(i), confidence };
             }
         }
@@ -319,4 +315,4 @@ private:
 
 } // namespace algorithm::node
 
-#endif // SPEECH_COMMANDS_inference_HPP
+#endif // SPEECH_COMMANDS_INFERENCE_HPP

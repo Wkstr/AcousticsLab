@@ -212,7 +212,7 @@ def convert(
                 ]
                 concrete_func.inputs[0].set_shape(input_shape)
                 converter = tf.lite.TFLiteConverter.from_concrete_functions(
-                    [concrete_func], trackable_obj=model
+                    [concrete_func]
                 )
                 converter.representative_dataset = (
                     _make_representative_dataset_generator(input_shape, wav_dir)

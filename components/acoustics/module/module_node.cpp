@@ -45,6 +45,4 @@ void __REGISTER_PREDEFINED_MODULE_NODE_BUILDER__()
         &module::node::MNOutput::create);
 }
 
-__attribute__((weak)) void __REGISTER_INTERNAL_MODULE_NODE_BUILDER__() { }
-
 } // namespace bridge
