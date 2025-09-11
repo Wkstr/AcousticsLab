@@ -1,9 +1,7 @@
 #include "core/logger.hpp"
 #include "module/module_builder.hpp"
 #include "module/module_node.hpp"
-#if defined(PORTING_LIB_DL_FFT_ENABLE) && PORTING_LIB_DL_FFT_ENABLE
 #include "node/speech_commands_preprocess.hpp"
-#endif
 
 namespace bridge {
 
