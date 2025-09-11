@@ -50,6 +50,8 @@ AcousticsLab aims to provide a comprehensive set of SOTA algorithms for sound an
 
 - [Gyroscope Euclidean Distance Anomaly Detection (GEDAD)](docs/algorithms/gedad/how-it-works.md): A lightweight algorithm for detecting anomalies in gyroscope and 3-axis accelerometer data.
 
+- [Speech Commands](https://arxiv.org/pdf/1804.03209): An algorithm for recognizing keywords and simple audio events, compatible with models trained using tools like Google's [Teachable Machine](https://teachablemachine.withgoogle.com/).
+
 ## Architecture Overview
 
 This diagram shows a modular embedded AI architecture. It features a layered design with a Hardware Abstraction Layer (HAL), a Core Library (with DSP/ML), an API, and an Application layer. The architecture is designed to simplify development and integrate easily with platforms like Arduino and MicroPython.

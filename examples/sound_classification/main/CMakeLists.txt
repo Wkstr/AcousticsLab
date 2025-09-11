@@ -13,6 +13,7 @@ file(GLOB_RECURSE PROJ_SRCS
 set(ACOUSTICS_API_VERSION "1" GLOBAL STRING "Acoustics API version")
 set(ACOUSTICS_LIB_OPUS_ENABLE ON GLOBAL BOOL "Enable OPUS support in acoustics-porting")
 set(ACOUSTICS_PORTING_LIB_TFLM_ENABLE ON GLOBAL BOOL "Enable TFLM support in acoustics-porting")
+set(ACOUSTICS_PORTING_LIB_DL_FFT_ENABLE ON GLOBAL BOOL "Enable DL_FFT support in acoustics-porting")
 
 idf_component_register(
     SRCS ${PROJ_SRCS}

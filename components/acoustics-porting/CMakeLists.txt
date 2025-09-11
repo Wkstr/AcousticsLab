@@ -71,6 +71,12 @@ file(GLOB_RECURSE ACOUSTICS_SRCS_HAL
     ${CMAKE_CURRENT_LIST_DIR}/../acoustics/hal/*.cpp
 )
 
+file(GLOB_RECURSE ACOUSTICS_SRCS_ALGORITHM
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/algorithm/*.c
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/algorithm/*.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/../acoustics/algorithm/*.cpp
+)
+
 file(GLOB_RECURSE ACOUSTICS_SRCS_MODULE
     ${CMAKE_CURRENT_LIST_DIR}/../acoustics/module/*.c
     ${CMAKE_CURRENT_LIST_DIR}/../acoustics/module/*.hpp
@@ -82,6 +88,7 @@ set(ACOUSTICS_SRCS
     ${ACOUSTICS_SRCS_API}
     ${ACOUSTICS_SRCS_CORE}
     ${ACOUSTICS_SRCS_HAL}
+    ${ACOUSTICS_SRCS_ALGORITHM}
     ${ACOUSTICS_SRCS_MODULE}
 )
 
@@ -171,6 +178,21 @@ else()
     endif()
 endif()
 
+if(NOT DEFINED ACOUSTICS_PORTING_LIB_DL_FFT_ENABLE)
+    set(PORTING_LIB_DL_FFT_ENABLE 0)
+    message(STATUS "DL_FFT support is disabled by default")
+else()
+    message(STATUS "DL_FFT support is set to: ${ACOUSTICS_PORTING_LIB_DL_FFT_ENABLE}")
+    if(ACOUSTICS_PORTING_LIB_DL_FFT_ENABLE STREQUAL "1" OR ACOUSTICS_PORTING_LIB_DL_FFT_ENABLE STREQUAL "ON")
+        set(PORTING_LIB_DL_FFT_ENABLE 1)
+        list(APPEND ACOUSTICS_REQUIRES dl_fft)
+        message(STATUS "DL_FFT support is enabled")
+    else()
+        set(PORTING_LIB_DL_FFT_ENABLE 0)
+        message(STATUS "DL_FFT support is disabled")
+    endif()
+endif()
+
 idf_component_register(
     SRCS ${ACOUSTICS_PORTING_SRCS}
     INCLUDE_DIRS ${ACOUSTICS_PORTING_INCLUDES_DIR}
@@ -186,6 +208,7 @@ target_compile_definitions(${COMPONENT_LIB} PUBLIC
     CORE_VERSION_PATCH=${ACOUSTICS_SDK_VERSION_PATCH}
     LIB_OPUS_ENABLE=${LIB_OPUS_ENABLE}
     PORTING_LIB_TFLM_ENABLE=${PORTING_LIB_TFLM_ENABLE}
+    PORTING_LIB_DL_FFT_ENABLE=${PORTING_LIB_DL_FFT_ENABLE}
 )
 
 if(LIB_OPUS_ENABLE)
