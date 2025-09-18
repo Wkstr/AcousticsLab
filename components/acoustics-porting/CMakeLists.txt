@@ -193,6 +193,14 @@ else()
     endif()
 endif()
 
+if(SOUND_BOARD STREQUAL "respeaker_lite")
+    set(BOARD_RESPEAKER_LITE 1)
+    message(STATUS "acoustics-porting: ReSpeaker Lite board support ENABLED.")
+else()
+    set(BOARD_RESPEAKER_LITE 0)
+    message(STATUS "acoustics-porting: Default board support ENABLED.")
+endif()
+
 idf_component_register(
     SRCS ${ACOUSTICS_PORTING_SRCS}
     INCLUDE_DIRS ${ACOUSTICS_PORTING_INCLUDES_DIR}
@@ -209,6 +217,7 @@ target_compile_definitions(${COMPONENT_LIB} PUBLIC
     LIB_OPUS_ENABLE=${LIB_OPUS_ENABLE}
     PORTING_LIB_TFLM_ENABLE=${PORTING_LIB_TFLM_ENABLE}
     PORTING_LIB_DL_FFT_ENABLE=${PORTING_LIB_DL_FFT_ENABLE}
+    BOARD_RESPEAKER_LITE=${BOARD_RESPEAKER_LITE}
 )
 
 if(LIB_OPUS_ENABLE)

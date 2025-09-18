@@ -22,9 +22,45 @@
 
 namespace porting::algorithm::node {
 
+#if defined(BOARD_RESPEAKER_LITE) && BOARD_RESPEAKER_LITE
+static inline void resampleLinearChunk(const int16_t *in_data, size_t in_size, int16_t *out_data, size_t out_start_pos,
+    size_t out_chunk_size, size_t in_rate, size_t out_rate) noexcept
+{
+    if (!in_data || !out_data || !in_size || !out_chunk_size || !in_rate || !out_rate)
+        return;
+
+    double ratio = static_cast<double>(in_rate) / static_cast<double>(out_rate);
+
+    for (size_t i = 0; i < out_chunk_size; ++i)
+    {
+        size_t out_pos = out_start_pos + i;
+        double in_pos = static_cast<double>(out_pos) * ratio;
+        size_t index1 = static_cast<size_t>(in_pos);
+        size_t index2 = index1 + 1;
+
+        if (index1 >= in_size)
+        {
+            out_data[i] = 0;
+            continue;
+        }
+
+        float fraction = static_cast<float>(in_pos - static_cast<double>(index1));
+        int16_t s1 = in_data[index1];
+        int16_t s2 = (index2 < in_size) ? in_data[index2] : s1;
+        int32_t interp = static_cast<int32_t>(std::roundf((1.0f - fraction) * s1 + fraction * s2));
+        out_data[i] = static_cast<int16_t>(std::clamp(interp, static_cast<int32_t>(std::numeric_limits<int16_t>::min()),
+            static_cast<int32_t>(std::numeric_limits<int16_t>::max())));
+    }
+}
+#endif
+
 class SpeechCommandsPreprocess final: public module::MNode
 {
-    static constexpr inline const size_t AUDIO_SAMPLES = 44032;
+#if defined(BOARD_RESPEAKER_LITE) && BOARD_RESPEAKER_LITE
+    static constexpr inline const size_t AUDIO_SAMPLES_INPUT = 16000;
+#else
+    static constexpr inline const size_t AUDIO_SAMPLES_INPUT = 44032;
+#endif
     static constexpr inline const size_t FRAME_LEN = 2048;
     static constexpr inline const size_t HOP_LEN = 1024;
     static constexpr inline const size_t NUM_FRAMES = 43;
@@ -123,13 +159,13 @@ private:
                 return {};
             auto *tensor = mio->operator()();
             if (!tensor || !tensor->data() || tensor->dtype() != core::Tensor::Type::Int16
-                || tensor->shape().size() != 2 || tensor->shape()[0] != AUDIO_SAMPLES || tensor->shape()[1] != 1)
+                || tensor->shape().size() != 2 || tensor->shape()[0] != AUDIO_SAMPLES_INPUT || tensor->shape()[1] != 1)
                 return {};
             return *inputs;
         }
 
         auto tensor = core::Tensor::create<std::shared_ptr<core::Tensor>>(core::Tensor::Type::Int16,
-            core::Tensor::Shape(static_cast<int>(AUDIO_SAMPLES), 1));
+            core::Tensor::Shape(static_cast<int>(AUDIO_SAMPLES_INPUT), 1));
         if (!tensor)
             return {};
         auto mio = std::make_shared<module::MIO>(tensor, "pcm_input");
@@ -195,7 +231,15 @@ private:
 
         for (size_t frame_idx = 0; frame_idx < NUM_FRAMES; ++frame_idx)
         {
+#if defined(BOARD_RESPEAKER_LITE) && BOARD_RESPEAKER_LITE
+            int16_t temp_resampled_chunk[HOP_LEN];
+            size_t out_start_pos = frame_idx * HOP_LEN;
+            resampleLinearChunk(input_data, AUDIO_SAMPLES_INPUT, temp_resampled_chunk, out_start_pos, HOP_LEN, 16000,
+                44100);
+            prepareFrame(temp_resampled_chunk, frame_idx);
+#else
             prepareFrame(input_data, frame_idx);
+#endif
 
             esp_err_t ret = dl_rfft_f32_run(_fft_handle, _fft_buffer);
             if (ret != ESP_OK)
@@ -234,7 +278,11 @@ private:
         else
             std::memset(_fft_buffer, 0, hop_bytes);
 
+#if defined(BOARD_RESPEAKER_LITE) && BOARD_RESPEAKER_LITE
+        fillFrameBuffer(input, HOP_LEN);
+#else
         fillFrameBuffer(input + (frame_idx * HOP_LEN), HOP_LEN);
+#endif
         std::memcpy(_fft_buffer + HOP_LEN, _frame_buffer, hop_bytes);
 
         for (size_t i = 0; i < FRAME_LEN; ++i)

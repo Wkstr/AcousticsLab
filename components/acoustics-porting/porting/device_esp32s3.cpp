@@ -58,7 +58,11 @@ static size_t getFreeMemorySize() noexcept
 
 static constexpr const char DEVICE_MODEL[] = "ESP32-S3";
 static constexpr const char DEVICE_VERSION[] = "1.0.0";
+#if defined(BOARD_RESPEAKER_LITE)
+static constexpr const char DEVICE_NAME[] = "ReSpeaker Lite (XIAO ESP32S3)";
+#else
 static constexpr const char DEVICE_NAME[] = "XIAO ESP32-S3";
+#endif
 static constexpr const size_t DEVICE_MEMORY_SIZE = 8 * 1024 * 1024;
 static constexpr const size_t DEVICE_NAME_LENGTH_MAX = 64;
 
