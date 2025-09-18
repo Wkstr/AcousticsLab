@@ -111,7 +111,7 @@ struct TaskSC final
                 LOG(INFO, "Estimated ADPCM size: %zu, OPUS size: %zu", adpcm_size, opus_size);
 
                 _adpcm_encoder = core::EncoderADPCMIMA::create(nullptr, adpcm_size);
-                _opus_encoder = core::EncoderLIBOPUS::create(nullptr, opus_size);
+                _opus_encoder = core::EncoderLIBOPUS::create(nullptr, opus_size, _sr);
 
                 auto base64_size = core::EncoderASCIIBase64::estimate(std::max(adpcm_size, opus_size));
                 LOG(INFO, "Estimated Base64 size: %zu", base64_size);
