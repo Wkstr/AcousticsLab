@@ -35,7 +35,9 @@ public:
             CONFIG_OBJECT_DECL_INTEGER("dout_pin", "I2S DOUT pin (unused for RX)", 43, 0, 48),
             CONFIG_OBJECT_DECL_INTEGER("din_pin", "I2S DIN pin", 44, 0, 48),
             CONFIG_OBJECT_DECL_INTEGER("sr", "PCM sample rate in Hz", 16000, 8000, 48000),
-            CONFIG_OBJECT_DECL_INTEGER("buffered_duration", "DMA buffered duration (s)", 2, 1, 5) };
+            CONFIG_OBJECT_DECL_INTEGER("channels", "Number of channels", 1, 1, 1),
+            CONFIG_OBJECT_DECL_INTEGER("buffered_duration", "Time duration of buffered data for DMA in seconds", 2, 1,
+                5) };
     }
 
     SensorI2SXMOS() noexcept : Sensor(Info(3, "I2S XMOS (ReSpeaker)", Type::Microphone, { DEFAULT_CONFIGS() })) { }
@@ -50,27 +52,32 @@ public:
         }
 
         const size_t sr = _info.configs["sr"].getValue<int>();
+        _channels = _info.configs["channels"].getValue<int>();
         _buffered_duration = _info.configs["buffered_duration"].getValue<int>();
         _data_buffer_capacity_frames = _buffered_duration * sr;
 
         if (!_data_buffer) [[likely]]
         {
-            _data_buffer_capacity_bytes = _data_buffer_capacity_frames * 1 * sizeof(int32_t);
+            _data_buffer_capacity_bytes = _data_buffer_capacity_frames * _channels * sizeof(int16_t);
             _data_buffer = std::shared_ptr<std::byte[]>(new std::byte[_data_buffer_capacity_bytes]);
             if (!_data_buffer) [[unlikely]]
             {
                 LOG(ERROR, "Failed to allocate data buffer, size: %zu bytes", _data_buffer_capacity_bytes);
                 return STATUS(ENOMEM, "Failed to allocate data buffer");
             }
+            LOG(DEBUG, "Allocated data buffer of size: %zu bytes at %p", _data_buffer_capacity_bytes,
+                _data_buffer.get());
         }
 
         if (!_rx_chan) [[likely]]
         {
-            _rx_chan_cfg.role = I2S_ROLE_SLAVE;
-            const uint32_t dma_frame_count = 800;
-            const uint32_t dma_desc_count = _data_buffer_capacity_frames / dma_frame_count;
-            _rx_chan_cfg.dma_desc_num = dma_desc_count;
-            _rx_chan_cfg.dma_frame_num = dma_frame_count;
+            const uint32_t frames_count = 800;
+            const uint32_t slots_count = _data_buffer_capacity_frames / frames_count;
+            LOG(DEBUG,
+                "Creating I2S channel with sample rate %d, buffered frames %d, sync frame count %ld, slots count %ld",
+                sr, _data_buffer_capacity_frames, frames_count, slots_count);
+            _rx_chan_cfg.dma_desc_num = slots_count;
+            _rx_chan_cfg.dma_frame_num = frames_count;
 
             auto ret = i2s_new_channel(&_rx_chan_cfg, nullptr, &_rx_chan);
             if (ret != ESP_OK) [[unlikely]]
@@ -97,14 +104,16 @@ public:
             _std_cfg = {
                 .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(sample_rate),
                 .slot_cfg = {
-                    .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
+                    .data_bit_width = I2S_DATA_BIT_WIDTH_16BIT,
                     .slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT,
                     .slot_mode = I2S_SLOT_MODE_MONO,
                     .slot_mask = I2S_STD_SLOT_LEFT,
                     .ws_width = 32,
                     .ws_pol = false,
                     .bit_shift = true,
-                    .left_align = false,
+                    .left_align = true,
+                    .big_endian = false,
+                    .bit_order_lsb = false,
                 },
                 .gpio_cfg = {
                     .mclk = I2S_GPIO_UNUSED,
@@ -113,18 +122,22 @@ public:
                 },
             };
 
-            auto ret_rx = i2s_channel_init_std_mode(_rx_chan, &_std_cfg);
-            if (ret_rx != ESP_OK) [[unlikely]]
-                return STATUS(EIO, "Failed to init I2S STD RX mode");
+            auto ret = i2s_channel_init_std_mode(_rx_chan, &_std_cfg);
+            if (ret != ESP_OK) [[unlikely]]
+            {
+                LOG(ERROR, "Failed to initialize I2S channel in PDM RX mode: %s", esp_err_to_name(ret));
+                return STATUS(EIO, "Failed to initialize I2S channel in PDM RX mode");
+            }
         }
 
         _frame_index = 0;
         _data_bytes_available = 0;
         {
-            auto ret_rx_en = i2s_channel_enable(_rx_chan);
-            if (ret_rx_en != ESP_OK) [[unlikely]]
+            auto ret = i2s_channel_enable(_rx_chan);
+            if (ret != ESP_OK) [[unlikely]]
             {
-                return STATUS(EIO, "Failed to enable I2S RX channel");
+                LOG(ERROR, "Failed to enable I2S channel: %s", esp_err_to_name(ret));
+                return STATUS(EIO, "Failed to enable I2S channel");
             }
         }
 
@@ -189,19 +202,30 @@ public:
     inline size_t dataAvailable() const noexcept override
     {
         if (!initialized()) [[unlikely]]
+        {
             return 0;
+        }
+
         const std::lock_guard<std::mutex> lock(_lock);
 
-        return _data_bytes_available.load(std::memory_order_acquire) / (1 * sizeof(int32_t));
+        return internalDataAvailable();
     }
 
     inline size_t dataClear() noexcept override
     {
         if (!initialized()) [[unlikely]]
+        {
             return 0;
+        }
         const std::lock_guard<std::mutex> lock(_lock);
-        const size_t frames = _data_bytes_available.load(std::memory_order_acquire) / (1 * sizeof(int32_t));
-        return internalDataDiscard(frames);
+
+        const size_t data_available = internalDataAvailable();
+        if (data_available == 0) [[unlikely]]
+        {
+            return 0;
+        }
+
+        return internalDataDiscard(data_available);
     }
 
     inline core::Status readDataFrame(core::DataFrame<std::unique_ptr<core::Tensor>> &data_frame,
@@ -243,7 +267,7 @@ public:
 
         size_t read = 0;
         {
-            size_t size = batch_size * 1 * sizeof(int32_t);
+            size_t size = batch_size * _channels * sizeof(int16_t);
             auto ret = i2s_channel_read(_rx_chan, _data_buffer.get(), size, &read,
                 pdMS_TO_TICKS((_buffered_duration + 1) * 1000));
             if (ret != ESP_OK) [[unlikely]]
@@ -262,28 +286,13 @@ public:
                     _info.status = Status::Idle;
                     return STATUS(EIO, "No data read from I2S channel");
                 }
-                batch_size = read / (1 * sizeof(int32_t));
-                read = batch_size * (1 * sizeof(int32_t));
+                batch_size = read / (_channels * sizeof(int16_t));
+                read = batch_size * (_channels * sizeof(int16_t));
             }
         }
+        data_frame.data = core::Tensor::create(core::Tensor::Type::Int16,
+            core::Tensor::Shape(static_cast<int>(batch_size), static_cast<int>(_channels)), _data_buffer, read);
 
-        auto mono_tensor
-            = core::Tensor::create(core::Tensor::Type::Int16, core::Tensor::Shape(static_cast<int>(batch_size), 1));
-        if (!mono_tensor)
-        {
-            _info.status = Status::Idle;
-            return STATUS(ENOMEM, "Failed to allocate mono tensor");
-        }
-        auto *mono_out = mono_tensor->data<int16_t>();
-        const int32_t *mono_in = reinterpret_cast<const int32_t *>(_data_buffer.get());
-
-        for (size_t i = 0; i < batch_size; ++i)
-        {
-            const int32_t sample_32bit = mono_in[i];
-            mono_out[i] = static_cast<int16_t>(sample_32bit >> 16);
-        }
-
-        data_frame.data = std::move(mono_tensor);
         data_frame.index = _frame_index;
         _frame_index += batch_size;
 
@@ -313,17 +322,23 @@ protected:
                 return false;
             }
         }
+
         return false;
     }
 
 private:
+    inline size_t internalDataAvailable() const noexcept
+    {
+        return _data_bytes_available.load(std::memory_order_acquire) / (_channels * sizeof(int16_t));
+    }
+
     inline size_t internalDataDiscard(size_t size) noexcept
     {
         size_t discarded = 0;
         while (discarded < size)
         {
-            size_t read
-                = std::min(static_cast<size_t>((size - discarded) * 1 * sizeof(int32_t)), _data_buffer_capacity_bytes);
+            size_t read = std::min(static_cast<size_t>((size - discarded) * _channels * sizeof(int16_t)),
+                _data_buffer_capacity_bytes);
             auto ret = i2s_channel_read(_rx_chan, _data_buffer.get(), read, &read,
                 pdMS_TO_TICKS((_buffered_duration + 1) * 1000));
             if (ret != ESP_OK) [[unlikely]]
@@ -339,7 +354,9 @@ private:
     inline void internalConsumeData(size_t size) noexcept
     {
         if (!size) [[unlikely]]
+        {
             return;
+        }
         size_t data_bytes_available = _data_bytes_available.load(std::memory_order_acquire);
         while (1)
         {
@@ -347,7 +364,9 @@ private:
             const size_t new_data_bytes_available = data_bytes_available - size;
             if (_data_bytes_available.compare_exchange_strong(data_bytes_available, new_data_bytes_available,
                     std::memory_order_release, std::memory_order_relaxed)) [[likely]]
+            {
                 return;
+            }
         }
     }
 
@@ -355,9 +374,11 @@ private:
 
     std::shared_ptr<std::byte[]> _data_buffer = nullptr;
     size_t _data_buffer_capacity_frames = 0;
-    size_t _data_buffer_capacity_bytes = 0;
+    static inline size_t _data_buffer_capacity_bytes = 0;
 
+    size_t _channels = 1;
     size_t _buffered_duration = 0;
+
     size_t _frame_index = 0;
     static inline std::atomic<size_t> _data_bytes_available = 0;
 
