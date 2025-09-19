@@ -38,6 +38,36 @@
 
 namespace v1 {
 
+static inline void resampleLinearChunk(const int16_t *in_data, size_t in_size, int16_t *out_data, size_t out_start_pos,
+    size_t out_chunk_size, size_t in_rate, size_t out_rate) noexcept
+{
+    if (!in_data || !out_data || !in_size || !out_chunk_size || !in_rate || !out_rate)
+        return;
+
+    double ratio = static_cast<double>(in_rate) / static_cast<double>(out_rate);
+
+    for (size_t i = 0; i < out_chunk_size; ++i)
+    {
+        size_t out_pos = out_start_pos + i;
+        double in_pos = static_cast<double>(out_pos) * ratio;
+        size_t index1 = static_cast<size_t>(in_pos);
+        size_t index2 = index1 + 1;
+
+        if (index1 >= in_size)
+        {
+            out_data[i] = 0;
+            continue;
+        }
+
+        float fraction = static_cast<float>(in_pos - static_cast<double>(index1));
+        int16_t s1 = in_data[index1];
+        int16_t s2 = (index2 < in_size) ? in_data[index2] : s1;
+        int32_t interp = static_cast<int32_t>(std::roundf((1.0f - fraction) * s1 + fraction * s2));
+        out_data[i] = static_cast<int16_t>(std::clamp(interp, static_cast<int32_t>(std::numeric_limits<int16_t>::min()),
+            static_cast<int32_t>(std::numeric_limits<int16_t>::max())));
+    }
+}
+
 namespace shared {
 
     inline std::atomic<bool> is_sampling = false;
@@ -57,6 +87,8 @@ namespace shared {
     inline constexpr const float overlap_ratio_min = 0.f;
     inline constexpr const float overlap_ratio_max = 0.6f;
     inline std::atomic<float> overlap_ratio = 0.5f;
+
+    inline std::atomic<size_t> sensor_sample_rate = 0;
 
 } // namespace shared
 
@@ -101,6 +133,7 @@ struct TaskSC final
                     }
                     _sr = sr;
                     _fs = _sr * shared::sample_chunk_ms / 1000;
+                    shared::sensor_sample_rate = static_cast<size_t>(_sr);
                     LOG(INFO, "Sample rate: %d, Frame size: %zu", _sr, _fs);
                 }
             }
@@ -433,15 +466,49 @@ struct TaskSC final
                 const auto head = shared::buffer_head;
                 const auto tail = shared::buffer_tail;
                 available = head - tail;
-                if (available < required) [[unlikely]]
+
+                const size_t sensor_sample_rate = shared::sensor_sample_rate.load();
+
+                if (sensor_sample_rate == 44100)
                 {
-                    return executor.submit(getptr(), shared::invoke_pull_ms);
+                    if (available < required) [[unlikely]]
+                    {
+                        return executor.submit(getptr(), shared::invoke_pull_ms);
+                    }
+                    for (size_t i = 0; i < required; ++i)
+                    {
+                        _input->data<int16_t>()[i] = shared::buffer[(tail + i) & shared::buffer_size_mask];
+                    }
+                    shared::buffer_tail = tail + std::min(to_discard, available);
                 }
-                for (size_t i = 0; i < required; ++i)
+                else
                 {
-                    _input->data<int16_t>()[i] = shared::buffer[(tail + i) & shared::buffer_size_mask];
+                    const size_t required_sensor = (required * sensor_sample_rate) / 44100;
+                    const size_t to_discard_sensor
+                        = static_cast<size_t>(std::round(required_sensor * (1.f - shared::overlap_ratio.load())));
+
+                    if (available < required_sensor) [[unlikely]]
+                    {
+                        return executor.submit(getptr(), shared::invoke_pull_ms);
+                    }
+
+                    std::vector<int16_t> temp_sensor_data(required_sensor);
+                    for (size_t i = 0; i < required_sensor; ++i)
+                    {
+                        temp_sensor_data[i] = shared::buffer[(tail + i) & shared::buffer_size_mask];
+                    }
+
+                    const size_t chunk_size = 1024;
+                    for (size_t chunk_start = 0; chunk_start < required; chunk_start += chunk_size)
+                    {
+                        size_t current_chunk_size = std::min(chunk_size, required - chunk_start);
+                        resampleLinearChunk(temp_sensor_data.data(), required_sensor,
+                            _input->data<int16_t>() + chunk_start, chunk_start, current_chunk_size, sensor_sample_rate,
+                            44100);
+                    }
+
+                    shared::buffer_tail = tail + std::min(to_discard_sensor, available);
                 }
-                shared::buffer_tail = tail + std::min(to_discard, available);
             }
             _current_id_next = _current_id + 1;
 
