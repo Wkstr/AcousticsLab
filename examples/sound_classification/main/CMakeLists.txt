@@ -15,13 +15,19 @@ set(ACOUSTICS_LIB_OPUS_ENABLE ON GLOBAL BOOL "Enable OPUS support in acoustics-p
 set(ACOUSTICS_PORTING_LIB_TFLM_ENABLE ON GLOBAL BOOL "Enable TFLM support in acoustics-porting")
 set(ACOUSTICS_PORTING_LIB_DL_FFT_ENABLE ON GLOBAL BOOL "Enable DL_FFT support in acoustics-porting")
 
-set(SOUND_BOARD "" CACHE STRING "Board selection: empty(default)|respeaker_lite")
-if(SOUND_BOARD STREQUAL "respeaker_lite")
-    set(BOARD_RESPEAKER_LITE ON CACHE BOOL "Enable ReSpeaker Lite board support" FORCE)
-    message(STATUS "Board for sound_sampler: ReSpeaker Lite enabled")
+if(NOT DEFINED PORTING_BOARD_MODEL_RESPEAKER_LITE)
+    set(PORTING_BOARD_MODEL_RESPEAKER_LITE 0)
+endif()
+if(NOT DEFINED PORTING_BOARD_MODEL_XIAO_S3)
+    set(PORTING_BOARD_MODEL_XIAO_S3 1) 
+endif()
+
+if(PORTING_BOARD_MODEL_RESPEAKER_LITE)
+    message(STATUS "Board: ReSpeaker Lite enabled")
+elseif(PORTING_BOARD_MODEL_XIAO_S3)
+    message(STATUS "Board: XIAO ESP32S3 enabled (default)")
 else()
-    set(BOARD_RESPEAKER_LITE OFF CACHE BOOL "Enable ReSpeaker Lite board support" FORCE)
-    message(STATUS "Board for sound_sampler: default (XIAO ESP32S3 mic)")
+    message(STATUS "Board: No specific board model enabled")
 endif()
 
 idf_component_register(

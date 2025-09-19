@@ -193,12 +193,19 @@ else()
     endif()
 endif()
 
-if(SOUND_BOARD STREQUAL "respeaker_lite")
-    set(BOARD_RESPEAKER_LITE 1)
+if(NOT DEFINED PORTING_BOARD_MODEL_RESPEAKER_LITE)
+    set(PORTING_BOARD_MODEL_RESPEAKER_LITE 0)
+endif()
+if(NOT DEFINED PORTING_BOARD_MODEL_XIAO_S3)
+    set(PORTING_BOARD_MODEL_XIAO_S3 1)  
+endif()
+
+if(PORTING_BOARD_MODEL_RESPEAKER_LITE)
     message(STATUS "acoustics-porting: ReSpeaker Lite board support ENABLED.")
+elseif(PORTING_BOARD_MODEL_XIAO_S3)
+    message(STATUS "acoustics-porting: XIAO ESP32S3 board support ENABLED (default).")
 else()
-    set(BOARD_RESPEAKER_LITE 0)
-    message(STATUS "acoustics-porting: Default board support ENABLED.")
+    message(STATUS "acoustics-porting: No specific board model enabled.")
 endif()
 
 idf_component_register(
@@ -217,7 +224,8 @@ target_compile_definitions(${COMPONENT_LIB} PUBLIC
     LIB_OPUS_ENABLE=${LIB_OPUS_ENABLE}
     PORTING_LIB_TFLM_ENABLE=${PORTING_LIB_TFLM_ENABLE}
     PORTING_LIB_DL_FFT_ENABLE=${PORTING_LIB_DL_FFT_ENABLE}
-    BOARD_RESPEAKER_LITE=${BOARD_RESPEAKER_LITE}
+    PORTING_BOARD_MODEL_RESPEAKER_LITE=${PORTING_BOARD_MODEL_RESPEAKER_LITE}
+    PORTING_BOARD_MODEL_XIAO_S3=${PORTING_BOARD_MODEL_XIAO_S3}
 )
 
 if(LIB_OPUS_ENABLE)
