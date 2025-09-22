@@ -160,7 +160,7 @@ public:
 
     inline int flush() noexcept override
     {
-        return fsync(fileno(stdout));
+        return usb_serial_jtag_wait_tx_done(portMAX_DELAY);
     }
 
 protected:
@@ -199,7 +199,7 @@ protected:
 
 private:
     usb_serial_jtag_driver_config_t _config = {
-        .tx_buffer_size = 8192,
+        .tx_buffer_size = 32 * 1024,
         .rx_buffer_size = 4096,
     };
 

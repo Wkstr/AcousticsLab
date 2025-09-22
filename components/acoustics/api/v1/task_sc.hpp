@@ -52,10 +52,10 @@ namespace shared {
     inline std::chrono::steady_clock::time_point buffer_base_ts = std::chrono::steady_clock::now();
 
     inline constexpr const size_t sample_chunk_ms = 100;
-    inline constexpr const size_t invoke_pull_ms = 20;
+    inline constexpr const size_t invoke_pull_ms = 10;
 
     inline constexpr const float overlap_ratio_min = 0.f;
-    inline constexpr const float overlap_ratio_max = 0.6f;
+    inline constexpr const float overlap_ratio_max = 0.75f;
     inline std::atomic<float> overlap_ratio = 0.5f;
 
 } // namespace shared
@@ -324,7 +324,7 @@ struct TaskSC final
             {
                 return 0;
             }
-            return (_fs - current_available) * 1000 / _sr;
+            return (_fs - current_available) * 1000 / (_sr + 1);
         }
 
         hal::Sensor *_sensor;
