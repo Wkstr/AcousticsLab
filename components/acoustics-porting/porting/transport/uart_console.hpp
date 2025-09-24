@@ -160,6 +160,10 @@ public:
 
     inline int flush() noexcept override
     {
+        if (!initialized()) [[unlikely]]
+        {
+            return 0; // Not initialized, nothing to flush
+        }
         return usb_serial_jtag_wait_tx_done(portMAX_DELAY);
     }
 
