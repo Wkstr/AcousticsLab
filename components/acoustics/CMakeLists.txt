@@ -89,6 +89,20 @@ if(NOT DEFINED ACOUSTICS_SDK_TARGET)
     message(FATAL_ERROR "ACOUSTICS_SDK_TARGET is not defined")
 endif()
 
+if(NOT DEFINED ACOUSTICS_LIB_LIBSAMPLERATE_ENABLE)
+    set(LIB_LIBSAMPLERATE_ENABLE 0)
+    message(STATUS "SRC (aka libsamplerate) support is disabled by default")
+else()
+    message(STATUS "SRC (aka libsamplerate) support is set to: ${ACOUSTICS_LIB_LIBSAMPLERATE_ENABLE}")
+    if(ACOUSTICS_LIB_LIBSAMPLERATE_ENABLE STREQUAL "1" OR ACOUSTICS_LIB_LIBSAMPLERATE_ENABLE STREQUAL "ON")
+        set(LIB_LIBSAMPLERATE_ENABLE 1)
+        message(STATUS "SRC (aka libsamplerate) support is enabled")
+    else()
+        set(LIB_LIBSAMPLERATE_ENABLE 0)
+        message(STATUS "SRC (aka libsamplerate) support is disabled")
+    endif()
+endif()
+
 if(NOT DEFINED ACOUSTICS_LIB_OPUS_ENABLE)
     set(LIB_OPUS_ENABLE 0)
     message(STATUS "OPUS support is disabled by default")
@@ -115,6 +129,7 @@ if(${ACOUSTICS_SDK_TARGET} STREQUAL "POSIX")
 
     target_compile_definitions(acoustics PUBLIC
         ACOUSTICS_API_VERSION=${ACOUSTICS_API_VERSION}
+        LIB_LIBSAMPLERATE_ENABLE=${LIB_LIBSAMPLERATE_ENABLE}
         LIB_OPUS_ENABLE=${LIB_OPUS_ENABLE}
     )
 

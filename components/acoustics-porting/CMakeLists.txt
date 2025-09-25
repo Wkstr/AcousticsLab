@@ -111,6 +111,28 @@ set(ACOUSTICS_PRIV_REQUIRES
     littlefs
 )
 
+if(NOT DEFINED ACOUSTICS_LIB_LIBSAMPLERATE_ENABLE)
+    set(LIB_LIBSAMPLERATE_ENABLE 0)
+    message(STATUS "SRC (aka libsamplerate) support is disabled by default")
+else()
+    message(STATUS "SRC (aka libsamplerate) support is set to: ${ACOUSTICS_LIB_LIBSAMPLERATE_ENABLE}")
+    if(ACOUSTICS_LIB_LIBSAMPLERATE_ENABLE STREQUAL "1" OR ACOUSTICS_LIB_LIBSAMPLERATE_ENABLE STREQUAL "ON")
+        set(LIB_LIBSAMPLERATE_DIR ${CMAKE_CURRENT_LIST_DIR}/../acoustics/3rdparty/libsamplerate)
+        file(GLOB_RECURSE LIB_LIBSAMPLERATE_SRCS
+            ${LIB_LIBSAMPLERATE_DIR}/src/*.c
+            ${LIB_LIBSAMPLERATE_DIR}/src/*.h
+        )
+        list(APPEND ACOUSTICS_PORTING_SRCS ${LIB_LIBSAMPLERATE_SRCS})
+        list(APPEND ACOUSTICS_PORTING_INCLUDES_DIR ${LIB_LIBSAMPLERATE_DIR}/include)
+
+        set(LIB_LIBSAMPLERATE_ENABLE 1)
+        message(STATUS "SRC (aka libsamplerate) support is enabled")
+    else()
+        set(LIB_LIBSAMPLERATE_ENABLE 0)
+        message(STATUS "SRC (aka libsamplerate) support is disabled")
+    endif()
+endif()
+
 if(NOT DEFINED ACOUSTICS_LIB_OPUS_ENABLE)
     set(LIB_OPUS_ENABLE 0)
     message(STATUS "OPUS support is disabled by default")
@@ -206,6 +228,7 @@ target_compile_definitions(${COMPONENT_LIB} PUBLIC
     CORE_VERSION_MAJOR=${ACOUSTICS_SDK_VERSION_MAJOR}
     CORE_VERSION_MINOR=${ACOUSTICS_SDK_VERSION_MINOR}
     CORE_VERSION_PATCH=${ACOUSTICS_SDK_VERSION_PATCH}
+    LIB_LIBSAMPLERATE_ENABLE=${LIB_LIBSAMPLERATE_ENABLE}
     LIB_OPUS_ENABLE=${LIB_OPUS_ENABLE}
     PORTING_LIB_TFLM_ENABLE=${PORTING_LIB_TFLM_ENABLE}
     PORTING_LIB_DL_FFT_ENABLE=${PORTING_LIB_DL_FFT_ENABLE}

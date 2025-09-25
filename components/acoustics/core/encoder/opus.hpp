@@ -16,6 +16,7 @@
 
 #include "core/encoder.hpp"
 #include "core/logger.hpp"
+#include "core/utils/sound_resample.hpp"
 
 #include <opus.h>
 
@@ -227,8 +228,13 @@ namespace encoder {
                 {
                     while (size >= _frame_size)
                     {
-                        resampleLinear(data, _frame_size, static_cast<int16_t *>(_resample_buffer),
-                            _resample_frame_size, _sample_rate, _sample_rate_encoder);
+                        if (!soundResampleLinear(data, _frame_size, static_cast<int16_t *>(_resample_buffer),
+                                _resample_frame_size, _sample_rate, _sample_rate_encoder))
+                        {
+                            LOG(ERROR, "Failed to resample audio");
+                            _error = EINVAL;
+                            return encoded;
+                        }
                         int res = opus_encode(_opus_encoder, static_cast<const opus_int16 *>(_resample_buffer),
                             _resample_frame_size, static_cast<unsigned char *>(_buffer), _buffer_size);
                         if (res < 0)
@@ -299,37 +305,6 @@ namespace encoder {
                     "buffer_size=%zu",
                     _frame_size, _resample_frame_size, _resample_buffer_size, _sample_rate, _sample_rate_encoder,
                     _buffer_size);
-            }
-
-            static void resampleLinear(const int16_t *in_data, size_t in_size, int16_t *out_data, size_t out_size,
-                size_t in_rate, size_t out_rate)
-            {
-                double ratio = static_cast<double>(in_rate) / out_rate;
-                size_t out_samples = static_cast<size_t>(std::floor(in_size / ratio));
-
-                if (out_samples > out_size)
-                {
-                    LOG(WARNING, "Output buffer size is too small, truncating");
-                    out_samples = out_size;
-                }
-
-                for (size_t i = 0; i < out_samples; ++i)
-                {
-                    float in_pos = static_cast<double>(i) * ratio;
-                    size_t index1 = static_cast<size_t>(std::floor(in_pos));
-                    size_t index2 = index1 + 1;
-
-                    float fraction = in_pos - index1;
-
-                    int16_t sample1 = in_data[index1];
-                    int16_t sample2 = (index2 < in_size) ? in_data[index2] : sample1;
-
-                    int32_t interpolated_sample
-                        = static_cast<int32_t>(std::roundf((1.0f - fraction) * sample1 + fraction * sample2));
-                    out_data[i] = static_cast<int16_t>(
-                        std::clamp(interpolated_sample, static_cast<int32_t>(std::numeric_limits<int16_t>::min()),
-                            static_cast<int32_t>(std::numeric_limits<int16_t>::max())));
-                }
             }
 
             State _state;
