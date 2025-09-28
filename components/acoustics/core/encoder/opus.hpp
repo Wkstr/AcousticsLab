@@ -16,7 +16,7 @@
 
 #include "core/encoder.hpp"
 #include "core/logger.hpp"
-#include "core/utils/sound_resample.hpp"
+#include "core/utils/resample.hpp"
 
 #include <opus.h>
 
@@ -228,7 +228,7 @@ namespace encoder {
                 {
                     while (size >= _frame_size)
                     {
-                        if (!soundResampleLinear(data, _frame_size, static_cast<int16_t *>(_resample_buffer),
+                        if (!_resampler.operator()(data, _frame_size, static_cast<int16_t *>(_resample_buffer),
                                 _resample_frame_size, _sample_rate, _sample_rate_encoder))
                         {
                             LOG(ERROR, "Failed to resample audio");
@@ -295,7 +295,7 @@ namespace encoder {
                   _resample_frame_size(resample_buffer_size / sizeof(ValueType)), _opus_encoder(opus_encoder),
                   _resample_buffer(resample_buffer), _resample_buffer_size(resample_buffer_size),
                   _sample_rate(sample_rate), _sample_rate_encoder(sample_rate_encoder), _buffer(buffer),
-                  _buffer_size(buffer_size), _internal_buffer(internal_buffer)
+                  _buffer_size(buffer_size), _internal_buffer(internal_buffer), _resampler()
             {
                 _state.sample_rate = sample_rate_encoder;
                 LOG(INFO,
@@ -318,6 +318,7 @@ namespace encoder {
             void *_buffer;
             const size_t _buffer_size;
             const bool _internal_buffer;
+            ResampleLinear1D<int16_t> _resampler;
         };
 
     } // namespace detail
