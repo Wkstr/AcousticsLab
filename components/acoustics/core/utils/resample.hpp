@@ -19,7 +19,18 @@ public:
     template<typename U, typename P = std::unique_ptr<ResampleLinear1D<T>>>
     static P create()
     {
-        return std::make_unique<ResampleLinear1D<U>>();
+        if constexpr (std::is_same_v<P, std::unique_ptr<ResampleLinear1D<T>>>)
+        {
+            return std::make_unique<ResampleLinear1D<T>>();
+        }
+        else if constexpr (std::is_same_v<P, std::shared_ptr<ResampleLinear1D<T>>>)
+        {
+            return std::make_shared<ResampleLinear1D<T>>();
+        }
+        else
+        {
+            return nullptr;
+        }
     }
 
     ResampleLinear1D() noexcept = default;

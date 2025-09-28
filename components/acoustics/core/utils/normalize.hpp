@@ -17,6 +17,9 @@ class RMSNormalize1D final
 public:
     struct Options final
     {
+        Options() noexcept = default;
+        ~Options() noexcept = default;
+
         float target_rms = 0.75f;
         float smoothing_factor = 0.95f;
         float fp_min = -1.0f;
@@ -24,12 +27,23 @@ public:
     };
 
     template<typename T = std::unique_ptr<RMSNormalize1D>>
-    static T create(const Options &options = Options()) noexcept
+    static T create(const Options &options = Options {}) noexcept
     {
-        return std::make_unique<RMSNormalize1D>(options);
+        if constexpr (std::is_same_v<T, std::unique_ptr<RMSNormalize1D>>)
+        {
+            return std::make_unique<RMSNormalize1D>(options);
+        }
+        else if constexpr (std::is_same_v<T, std::shared_ptr<RMSNormalize1D>>)
+        {
+            return std::make_shared<RMSNormalize1D>(options);
+        }
+        else
+        {
+            return nullptr;
+        }
     }
 
-    RMSNormalize1D(const Options &options = Options()) noexcept : _options(options), _smoothed_gain(1.0f) { }
+    RMSNormalize1D(const Options &options) noexcept : _options(options), _smoothed_gain(1.0f) { }
     ~RMSNormalize1D() noexcept = default;
 
     template<typename T, typename P = float,
