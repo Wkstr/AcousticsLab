@@ -72,6 +72,11 @@ public:
                     priority, fft_handle, fft_buffer, frame_buffer, window_buffer));
             if (!node)
                 goto Err;
+            auto status = node->config(configs);
+            if (!status) [[unlikely]]
+            {
+                LOG(DEBUG, "Failed to configure node: %s", status.message().c_str());
+            }
             return node;
         }
 
@@ -207,7 +212,7 @@ private:
         dl_fft_f32_t *fft_handle, float *fft_buffer, float *frame_buffer, float *window_buffer) noexcept
         : module::MNode(std::string(node_name), std::move(inputs), std::move(outputs), priority),
           _fft_handle(fft_handle), _fft_buffer(fft_buffer), _frame_buffer(frame_buffer), _window_buffer(window_buffer),
-          _normalizer(nullptr)
+          _normalizer()
     {
     }
 

@@ -23,6 +23,7 @@ namespace v1 {
 class CmdCfgSC final: public api::Command
 {
     static inline constexpr const char *overlap_ratio_path = CONTEXT_PREFIX CONTEXT_VERSION "/overlap_ratio";
+    static inline constexpr const char *rms_normalize_path = CONTEXT_PREFIX CONTEXT_VERSION "/rms_normalize";
 
 public:
     static inline void preInitHook()
@@ -45,13 +46,27 @@ public:
             }
             shared::overlap_ratio = std::clamp(overlap_ratio, shared::overlap_ratio_min, shared::overlap_ratio_max);
         }
+
+        {
+            bool rms_normalize = shared::rms_normalize.load();
+            size_t size = sizeof(rms_normalize);
+            auto status = device->load(hal::Device::StorageType::Internal, rms_normalize_path, &rms_normalize, size);
+            if (!status || size != sizeof(rms_normalize)) [[unlikely]]
+            {
+                LOG(ERROR, "Failed to load rms_normalize or size mismatch");
+                return;
+            }
+            shared::rms_normalize = rms_normalize;
+        }
     }
 
     CmdCfgSC()
         : Command("CFGSC", "Configure the Sound Classification",
               core::ConfigObjectMap {
                   CONFIG_OBJECT_DECL_FLOAT("overlap_ratio", "Overlap ratio of sound samples for each classification",
-                      v1::shared::overlap_ratio.load(), shared::overlap_ratio_min, shared::overlap_ratio_max) }),
+                      v1::shared::overlap_ratio.load(), shared::overlap_ratio_min, shared::overlap_ratio_max),
+                  CONFIG_OBJECT_DECL_BOOLEAN("rms_normalize", "Enable or disable RMS normalization",
+                      v1::shared::rms_normalize.load()) }),
           _device(hal::DeviceRegistry::getDevice())
     {
     }
@@ -86,6 +101,29 @@ public:
             }
         }
 
+        if (auto it = args.find("@1"); it != args.end())
+        {
+            if (auto rms_normalize_str = std::get_if<std::string>(&it->second);
+                rms_normalize_str != nullptr && !rms_normalize_str->empty())
+            {
+                auto &target = _args["rms_normalize"];
+                if ((status = target.setValue(*rms_normalize_str)))
+                {
+                    const auto old = shared::rms_normalize.load();
+                    bool rms_normalize = target.getValue<bool>();
+                    if (old != rms_normalize && _device
+                        && !(status = _device->store(hal::Device::StorageType::Internal, rms_normalize_path,
+                                 &rms_normalize, sizeof(rms_normalize))))
+                    {
+                        goto Reply;
+                    }
+                    v1::shared::rms_normalize = rms_normalize;
+                }
+                else
+                    goto Reply;
+            }
+        }
+
     Reply: {
         auto writer = v1::defaults::serializer->writer(v1::defaults::wait_callback,
             std::bind(&v1::defaults::write_callback, std::ref(transport), std::placeholders::_1, std::placeholders::_2),
@@ -110,6 +148,12 @@ public:
                     arg += shared::overlap_ratio.load();
                     arg += shared::overlap_ratio_min;
                     arg += shared::overlap_ratio_max;
+                }
+                {
+                    auto arg = args.writer<core::ArrayWriter>();
+                    arg += shared::rms_normalize.load();
+                    arg += 0;
+                    arg += 1;
                 }
             }
             data["sampleChunkMs"] += shared::sample_chunk_ms;

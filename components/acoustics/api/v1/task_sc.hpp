@@ -57,7 +57,7 @@ namespace shared {
     inline constexpr const float overlap_ratio_min = 0.f;
     inline constexpr const float overlap_ratio_max = 0.75f;
     inline std::atomic<float> overlap_ratio = 0.5f;
-
+    inline std::atomic<bool> rms_normalize = false;
 } // namespace shared
 
 struct TaskSC final
@@ -353,7 +353,8 @@ struct TaskSC final
             std::string tag, const volatile size_t &external_task_id) noexcept
             : api::Task(context, transport, id, v1::defaults::task_priority), _dag(std::move(dag)),
               _tag(std::move(tag)), _external_task_id(external_task_id), _internal_task_id(_external_task_id),
-              _start_time(std::chrono::steady_clock::now()), _current_id(0), _current_id_next(0)
+              _start_time(std::chrono::steady_clock::now()), _rms_normalize(shared::rms_normalize.load()),
+              _current_id(0), _current_id_next(0)
         {
             {
                 auto device = hal::DeviceRegistry::getDevice();
@@ -370,6 +371,9 @@ struct TaskSC final
             if (!_dag)
             {
                 return;
+            }
+            {
+                configureRMSNormalize(true);
             }
             {
                 auto p_inp_node = _dag->node("input");
@@ -418,6 +422,8 @@ struct TaskSC final
             {
                 return replyWithStatus(STATUS(EFAULT, "DAG, input, or output is null"));
             }
+
+            configureRMSNormalize();
 
             const auto &inp_shape = _input->shape();
             if (inp_shape.size() != 2 || inp_shape[0] > shared::buffer_size || inp_shape[1] != 1)
@@ -503,11 +509,34 @@ struct TaskSC final
             return status;
         }
 
+        void configureRMSNormalize(bool force = false) noexcept
+        {
+            if (!force)
+            {
+                const bool target = shared::rms_normalize.load();
+                if (_rms_normalize == target)
+                    return;
+                _rms_normalize = target;
+            }
+
+            auto dag = _dag;
+            if (!dag)
+                return;
+            auto p_node = dag->node("SpeechCommandsPreprocess");
+            if (!p_node)
+                return;
+            auto status = p_node->config(core::ConfigMap {
+                { "rms_normalize", _rms_normalize },
+            });
+            LOG(DEBUG, "Configured RMS normalize to %d: %s", _rms_normalize, status.message().c_str());
+        }
+
         std::shared_ptr<module::MDAG> _dag;
         const std::string _tag;
         const volatile size_t &_external_task_id;
         const size_t _internal_task_id;
         const std::chrono::steady_clock::time_point _start_time;
+        bool _rms_normalize;
         size_t _current_id;
         size_t _current_id_next;
 
