@@ -38,36 +38,6 @@
 
 namespace v1 {
 
-static inline void resampleLinearChunk(const int16_t *in_data, size_t in_size, int16_t *out_data, size_t out_start_pos,
-    size_t out_chunk_size, size_t in_rate, size_t out_rate) noexcept
-{
-    if (!in_data || !out_data || !in_size || !out_chunk_size || !in_rate || !out_rate)
-        return;
-
-    double ratio = static_cast<double>(in_rate) / static_cast<double>(out_rate);
-
-    for (size_t i = 0; i < out_chunk_size; ++i)
-    {
-        size_t out_pos = out_start_pos + i;
-        double in_pos = static_cast<double>(out_pos) * ratio;
-        size_t index1 = static_cast<size_t>(in_pos);
-        size_t index2 = index1 + 1;
-
-        if (index1 >= in_size)
-        {
-            out_data[i] = 0;
-            continue;
-        }
-
-        float fraction = static_cast<float>(in_pos - static_cast<double>(index1));
-        int16_t s1 = in_data[index1];
-        int16_t s2 = (index2 < in_size) ? in_data[index2] : s1;
-        int32_t interp = static_cast<int32_t>(std::roundf((1.0f - fraction) * s1 + fraction * s2));
-        out_data[i] = static_cast<int16_t>(std::clamp(interp, static_cast<int32_t>(std::numeric_limits<int16_t>::min()),
-            static_cast<int32_t>(std::numeric_limits<int16_t>::max())));
-    }
-}
-
 namespace shared {
 
     inline std::atomic<bool> is_sampling = false;
@@ -82,14 +52,12 @@ namespace shared {
     inline std::chrono::steady_clock::time_point buffer_base_ts = std::chrono::steady_clock::now();
 
     inline constexpr const size_t sample_chunk_ms = 100;
-    inline constexpr const size_t invoke_pull_ms = 20;
+    inline constexpr const size_t invoke_pull_ms = 10;
 
     inline constexpr const float overlap_ratio_min = 0.f;
-    inline constexpr const float overlap_ratio_max = 0.6f;
+    inline constexpr const float overlap_ratio_max = 0.75f;
     inline std::atomic<float> overlap_ratio = 0.5f;
-
-    inline std::atomic<size_t> sensor_sample_rate = 0;
-
+    inline std::atomic<bool> rms_normalize = false;
 } // namespace shared
 
 struct TaskSC final
@@ -133,7 +101,6 @@ struct TaskSC final
                     }
                     _sr = sr;
                     _fs = _sr * shared::sample_chunk_ms / 1000;
-                    shared::sensor_sample_rate = static_cast<size_t>(_sr);
                     LOG(INFO, "Sample rate: %d, Frame size: %zu", _sr, _fs);
                 }
             }
@@ -144,7 +111,7 @@ struct TaskSC final
                 LOG(INFO, "Estimated ADPCM size: %zu, OPUS size: %zu", adpcm_size, opus_size);
 
                 _adpcm_encoder = core::EncoderADPCMIMA::create(nullptr, adpcm_size);
-                _opus_encoder = core::EncoderLIBOPUS::create(nullptr, opus_size, _sr);
+                _opus_encoder = core::EncoderLIBOPUS::create(nullptr, opus_size);
 
                 auto base64_size = core::EncoderASCIIBase64::estimate(std::max(adpcm_size, opus_size));
                 LOG(INFO, "Estimated Base64 size: %zu", base64_size);
@@ -357,7 +324,7 @@ struct TaskSC final
             {
                 return 0;
             }
-            return (_fs - current_available) * 1000 / _sr;
+            return (_fs - current_available) * 1000 / (_sr + 1);
         }
 
         hal::Sensor *_sensor;
@@ -386,7 +353,8 @@ struct TaskSC final
             std::string tag, const volatile size_t &external_task_id) noexcept
             : api::Task(context, transport, id, v1::defaults::task_priority), _dag(std::move(dag)),
               _tag(std::move(tag)), _external_task_id(external_task_id), _internal_task_id(_external_task_id),
-              _start_time(std::chrono::steady_clock::now()), _current_id(0), _current_id_next(0)
+              _start_time(std::chrono::steady_clock::now()), _rms_normalize(shared::rms_normalize.load()),
+              _current_id(0), _current_id_next(0)
         {
             {
                 auto device = hal::DeviceRegistry::getDevice();
@@ -403,6 +371,9 @@ struct TaskSC final
             if (!_dag)
             {
                 return;
+            }
+            {
+                configureRMSNormalize(true);
             }
             {
                 auto p_inp_node = _dag->node("input");
@@ -452,6 +423,8 @@ struct TaskSC final
                 return replyWithStatus(STATUS(EFAULT, "DAG, input, or output is null"));
             }
 
+            configureRMSNormalize();
+
             const auto &inp_shape = _input->shape();
             if (inp_shape.size() != 2 || inp_shape[0] > shared::buffer_size || inp_shape[1] != 1)
             {
@@ -466,49 +439,15 @@ struct TaskSC final
                 const auto head = shared::buffer_head;
                 const auto tail = shared::buffer_tail;
                 available = head - tail;
-
-                const size_t sensor_sample_rate = shared::sensor_sample_rate.load();
-
-                if (sensor_sample_rate == 44100)
+                if (available < required) [[unlikely]]
                 {
-                    if (available < required) [[unlikely]]
-                    {
-                        return executor.submit(getptr(), shared::invoke_pull_ms);
-                    }
-                    for (size_t i = 0; i < required; ++i)
-                    {
-                        _input->data<int16_t>()[i] = shared::buffer[(tail + i) & shared::buffer_size_mask];
-                    }
-                    shared::buffer_tail = tail + std::min(to_discard, available);
+                    return executor.submit(getptr(), shared::invoke_pull_ms);
                 }
-                else
+                for (size_t i = 0; i < required; ++i)
                 {
-                    const size_t required_sensor = (required * sensor_sample_rate) / 44100;
-                    const size_t to_discard_sensor
-                        = static_cast<size_t>(std::round(required_sensor * (1.f - shared::overlap_ratio.load())));
-
-                    if (available < required_sensor) [[unlikely]]
-                    {
-                        return executor.submit(getptr(), shared::invoke_pull_ms);
-                    }
-
-                    std::vector<int16_t> temp_sensor_data(required_sensor);
-                    for (size_t i = 0; i < required_sensor; ++i)
-                    {
-                        temp_sensor_data[i] = shared::buffer[(tail + i) & shared::buffer_size_mask];
-                    }
-
-                    const size_t chunk_size = 1024;
-                    for (size_t chunk_start = 0; chunk_start < required; chunk_start += chunk_size)
-                    {
-                        size_t current_chunk_size = std::min(chunk_size, required - chunk_start);
-                        resampleLinearChunk(temp_sensor_data.data(), required_sensor,
-                            _input->data<int16_t>() + chunk_start, chunk_start, current_chunk_size, sensor_sample_rate,
-                            44100);
-                    }
-
-                    shared::buffer_tail = tail + std::min(to_discard_sensor, available);
+                    _input->data<int16_t>()[i] = shared::buffer[(tail + i) & shared::buffer_size_mask];
                 }
+                shared::buffer_tail = tail + std::min(to_discard, available);
             }
             _current_id_next = _current_id + 1;
 
@@ -570,11 +509,34 @@ struct TaskSC final
             return status;
         }
 
+        void configureRMSNormalize(bool force = false) noexcept
+        {
+            if (!force)
+            {
+                const bool target = shared::rms_normalize.load();
+                if (_rms_normalize == target)
+                    return;
+                _rms_normalize = target;
+            }
+
+            auto dag = _dag;
+            if (!dag)
+                return;
+            auto p_node = dag->node("SpeechCommandsPreprocess");
+            if (!p_node)
+                return;
+            auto status = p_node->config(core::ConfigMap {
+                { "rms_normalize", _rms_normalize },
+            });
+            LOG(DEBUG, "Configured RMS normalize to %d: %s", _rms_normalize, status.message().c_str());
+        }
+
         std::shared_ptr<module::MDAG> _dag;
         const std::string _tag;
         const volatile size_t &_external_task_id;
         const size_t _internal_task_id;
         const std::chrono::steady_clock::time_point _start_time;
+        bool _rms_normalize;
         size_t _current_id;
         size_t _current_id_next;
 

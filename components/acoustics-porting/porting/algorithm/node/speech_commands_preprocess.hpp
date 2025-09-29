@@ -7,6 +7,7 @@
 #include "core/logger.hpp"
 #include "core/status.hpp"
 #include "core/tensor.hpp"
+#include "core/utils/normalize.hpp"
 
 #include "module/module_node.hpp"
 
@@ -71,6 +72,11 @@ public:
                     priority, fft_handle, fft_buffer, frame_buffer, window_buffer));
             if (!node)
                 goto Err;
+            auto status = node->config(configs);
+            if (!status) [[unlikely]]
+            {
+                LOG(DEBUG, "Failed to configure node: %s", status.message().c_str());
+            }
             return node;
         }
 
@@ -109,6 +115,33 @@ public:
             delete[] _window_buffer;
             _window_buffer = nullptr;
         }
+    }
+
+    virtual core::Status config(const core::ConfigMap &configs) noexcept override
+    {
+        auto it = configs.find("rms_normalize");
+        if (it != configs.end())
+        {
+            bool success = false;
+            std::visit(
+                [this, &success](auto &&enable) {
+                    if constexpr (std::is_same_v<std::remove_cvref_t<decltype(enable)>, bool>)
+                    {
+                        if (enable && !_normalizer)
+                        {
+                            _normalizer = core::RMSNormalize1D::create<std::shared_ptr<core::RMSNormalize1D>>();
+                        }
+                        else if (!enable && _normalizer)
+                        {
+                            _normalizer.reset();
+                        }
+                        success = true;
+                    }
+                },
+                it->second);
+            return success ? STATUS_OK() : STATUS(EINVAL, "Invalid value for 'rms_normalize', expected boolean");
+        }
+        return STATUS(ENOTSUP, "No valid configuration found");
     }
 
 private:
@@ -178,7 +211,8 @@ private:
     SpeechCommandsPreprocess(const core::ConfigMap &configs, module::MIOS inputs, module::MIOS outputs, int priority,
         dl_fft_f32_t *fft_handle, float *fft_buffer, float *frame_buffer, float *window_buffer) noexcept
         : module::MNode(std::string(node_name), std::move(inputs), std::move(outputs), priority),
-          _fft_handle(fft_handle), _fft_buffer(fft_buffer), _frame_buffer(frame_buffer), _window_buffer(window_buffer)
+          _fft_handle(fft_handle), _fft_buffer(fft_buffer), _frame_buffer(frame_buffer), _window_buffer(window_buffer),
+          _normalizer()
     {
     }
 
@@ -222,6 +256,11 @@ private:
         for (size_t i = 0; i < size; ++i)
         {
             _frame_buffer[i] = static_cast<float>(input[i]) / NORM_BOUND_I16;
+        }
+        auto normalizer = _normalizer;
+        if (normalizer)
+        {
+            normalizer->operator()(_frame_buffer, size);
         }
     }
 
@@ -273,6 +312,7 @@ private:
     float *_fft_buffer;
     float *_frame_buffer;
     float *_window_buffer;
+    std::shared_ptr<core::RMSNormalize1D> _normalizer;
 };
 
 } // namespace porting::algorithm::node
