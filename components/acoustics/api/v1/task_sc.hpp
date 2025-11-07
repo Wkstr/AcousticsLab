@@ -19,6 +19,7 @@
 #include "hal/engine.hpp"
 #include "hal/sensor.hpp"
 
+#include "board/board_config.h"
 #include "module/module_dag.hpp"
 #include "module/module_node.hpp"
 
@@ -215,11 +216,11 @@ struct TaskSC final
                 }
             }
 
-            // status = replyWithStatus(status, df_ts, encoder_writer);
-            // if (!status) [[unlikely]]
-            // {
-            //     return status;
-            // }
+            status = replyWithStatus(status, df_ts, encoder_writer);
+            if (!status) [[unlikely]]
+            {
+                return status;
+            }
 
             return executor.submit(getptr(), getNextDataDelay(_sensor->dataAvailable()));
         }
@@ -401,34 +402,25 @@ struct TaskSC final
                 _output = p_out_tsr;
             }
             {
-                auto sensor = hal::SensorRegistry::getSensor(2);
-                if (sensor)
+                _source_rate = BOARD_RAW_SAMPLE_RATE;
+                if (_source_rate != 44100)
                 {
-                    auto it = sensor->info().configs.find("sr");
-                    if (it != sensor->info().configs.end())
+                    _needs_resampling = true;
+                    const auto &inp_shape = _input->shape();
+                    if (inp_shape.size() >= 1)
                     {
-                        _source_rate = it->second.getValue<int>();
-                        if (_source_rate != 44100)
-                        {
-                            _needs_resampling = true;
-                            const auto &inp_shape = _input->shape();
-                            if (inp_shape.size() >= 1)
-                            {
-                                const size_t target_samples = inp_shape[0];
-                                _resample_buffer_size = static_cast<size_t>(
-                                    std::ceil(target_samples * static_cast<float>(_source_rate) / 44100.f));
-                                _resample_buffer = std::make_unique<int16_t[]>(_resample_buffer_size);
-                                _resampler = core::ResampleLinear1D<int16_t>();
-                                LOG(INFO,
-                                    "Resampling enabled: source_rate=%d Hz, target_rate=44100 Hz, buffer_size=%zu",
-                                    _source_rate, _resample_buffer_size);
-                            }
-                        }
-                        else
-                        {
-                            LOG(INFO, "Resampling disabled: sensor sample rate is 44.1kHz");
-                        }
+                        const size_t target_samples = inp_shape[0];
+                        _resample_buffer_size = static_cast<size_t>(
+                            std::ceil(target_samples * static_cast<float>(_source_rate) / 44100.f));
+                        _resample_buffer = std::make_unique<int16_t[]>(_resample_buffer_size);
+                        _resampler = core::ResampleLinear1D<int16_t>();
+                        LOG(INFO, "Resampling enabled: source_rate=%d Hz, target_rate=44100 Hz, buffer_size=%zu",
+                            _source_rate, _resample_buffer_size);
                     }
+                }
+                else
+                {
+                    LOG(INFO, "Resampling disabled: sensor sample rate is 44.1kHz");
                 }
             }
         }

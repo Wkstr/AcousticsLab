@@ -2,6 +2,7 @@
 #ifndef I2SMIC_HPP
 #define I2SMIC_HPP
 
+#include "board/board_config.h"
 #include "hal/sensor.hpp"
 
 #include <driver/gpio.h>
@@ -22,20 +23,6 @@
 #include <mutex>
 #include <string>
 
-#if defined(PORTING_BOARD_MODEL_XIAO_S3) && PORTING_BOARD_MODEL_XIAO_S3
-#include "board/xiao_s3.hpp"
-namespace board_config = board::xiao_s3;
-#elif defined(PORTING_BOARD_MODEL_RESPEAKER_LITE) && PORTING_BOARD_MODEL_RESPEAKER_LITE
-#include "board/respeaker_lite.hpp"
-namespace board_config = board::respeaker_lite;
-#elif defined(PORTING_BOARD_MODEL_RESPEAKER_XVF3800) && PORTING_BOARD_MODEL_RESPEAKER_XVF3800
-#include "board/respeaker_xvf3800.hpp"
-namespace board_config = board::respeaker_xvf3800;
-#else
-#include "board/xiao_s3.hpp"
-namespace board_config = board::xiao_s3;
-#endif
-
 namespace porting {
 
 using namespace hal;
@@ -45,17 +32,17 @@ class SensorI2SMic final: public Sensor
 public:
     static inline core::ConfigObjectMap DEFAULT_CONFIGS() noexcept
     {
-#if defined(PORTING_BOARD_MODEL_XIAO_S3) && PORTING_BOARD_MODEL_XIAO_S3
-        return { CONFIG_OBJECT_DECL_INTEGER("clk_pin", "Clock pin number", 42, 0, 48),
-            CONFIG_OBJECT_DECL_INTEGER("din_pin", "Data pin number", 41, 0, 48),
-            CONFIG_OBJECT_DECL_INTEGER("sr", "PCM sample rate in Hz", 44100, 8000, 48000),
+#if BOARD_USE_PDM_MODE
+        return { CONFIG_OBJECT_DECL_INTEGER("clk_pin", "Clock pin number", BOARD_PDM_CLK_PIN, 0, 48),
+            CONFIG_OBJECT_DECL_INTEGER("din_pin", "Data pin number", BOARD_PDM_DIN_PIN, 0, 48),
+            CONFIG_OBJECT_DECL_INTEGER("sr", "PCM sample rate in Hz", BOARD_RAW_SAMPLE_RATE, 8000, 48000),
             CONFIG_OBJECT_DECL_INTEGER("channels", "Number of channels", 1, 1, 1),
             CONFIG_OBJECT_DECL_INTEGER("buffered_duration", "Time duration of buffered data for DMA in seconds", 2, 1,
                 5) };
 #else
-        return { CONFIG_OBJECT_DECL_INTEGER("bclk_pin", "I2S BCLK pin", 8, 0, 48),
-            CONFIG_OBJECT_DECL_INTEGER("ws_pin", "I2S WS/LRCLK pin", 7, 0, 48),
-            CONFIG_OBJECT_DECL_INTEGER("sr", "PCM sample rate in Hz", 16000, 8000, 48000),
+        return { CONFIG_OBJECT_DECL_INTEGER("bclk_pin", "I2S BCLK pin", BOARD_I2S_BCLK_PIN, 0, 48),
+            CONFIG_OBJECT_DECL_INTEGER("ws_pin", "I2S WS/LRCLK pin", BOARD_I2S_WS_PIN, 0, 48),
+            CONFIG_OBJECT_DECL_INTEGER("sr", "PCM sample rate in Hz", BOARD_RAW_SAMPLE_RATE, 8000, 48000),
             CONFIG_OBJECT_DECL_INTEGER("channels", "Number of channels", 1, 1, 1),
             CONFIG_OBJECT_DECL_INTEGER("buffered_duration", "Time duration of buffered data for DMA in seconds", 2, 1,
                 5) };
@@ -93,24 +80,18 @@ public:
 
         if (!_rx_chan) [[likely]]
         {
-            const uint32_t frames_count = board_config::DMA_FRAME_COUNT;
+            const uint32_t frames_count = BOARD_DMA_FRAME_COUNT;
             const uint32_t slots_count = _data_buffer_capacity_frames / frames_count;
             LOG(DEBUG,
                 "Creating I2S channel with sample rate %d, buffered frames %d, sync frame count %ld, slots count %ld",
                 sr, _data_buffer_capacity_frames, frames_count, slots_count);
 
-#if defined(PORTING_BOARD_MODEL_XIAO_S3) && PORTING_BOARD_MODEL_XIAO_S3
+#if BOARD_USE_PDM_MODE
             _rx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
-            LOG(INFO, "Configuring I2S for XIAO S3: PDM mode, Master role");
-#elif defined(PORTING_BOARD_MODEL_RESPEAKER_LITE) && PORTING_BOARD_MODEL_RESPEAKER_LITE
-            _rx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, board_config::I2S_ROLE);
-            LOG(INFO, "Configuring I2S for ReSpeaker Lite: STD mode, Slave role");
-#elif defined(PORTING_BOARD_MODEL_RESPEAKER_XVF3800) && PORTING_BOARD_MODEL_RESPEAKER_XVF3800
-            _rx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, board_config::I2S_ROLE);
-            LOG(INFO, "Configuring I2S for ReSpeaker XVF3800: STD mode, Master role");
+            LOG(INFO, "Configuring I2S: PDM mode, Master role");
 #else
-            _rx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
-            LOG(INFO, "Configuring I2S: PDM mode (default), Master role");
+            _rx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, BOARD_I2S_ROLE);
+            LOG(INFO, "Configuring I2S: STD mode, Role=%d", BOARD_I2S_ROLE);
 #endif
 
             _rx_chan_cfg.dma_desc_num = slots_count;
@@ -131,7 +112,7 @@ public:
             }
         }
 
-#if defined(PORTING_BOARD_MODEL_XIAO_S3) && PORTING_BOARD_MODEL_XIAO_S3
+#if BOARD_USE_PDM_MODE
         {
             _pdm_rx_cfg.clk_cfg = I2S_PDM_RX_CLK_DEFAULT_CONFIG(sr);
             _pdm_rx_cfg.slot_cfg = I2S_PDM_RX_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
@@ -153,8 +134,8 @@ public:
         {
             const gpio_num_t bclk = static_cast<gpio_num_t>(_info.configs["bclk_pin"].getValue<int>());
             const gpio_num_t ws = static_cast<gpio_num_t>(_info.configs["ws_pin"].getValue<int>());
-            const gpio_num_t din = board_config::I2S_DIN_PIN;
-            const gpio_num_t dout = board_config::I2S_DOUT_PIN;
+            const gpio_num_t din = BOARD_I2S_DIN_PIN;
+            const gpio_num_t dout = BOARD_I2S_DOUT_PIN;
             const uint32_t sample_rate = static_cast<uint32_t>(_info.configs["sr"].getValue<int>());
 
             _std_cfg = {
