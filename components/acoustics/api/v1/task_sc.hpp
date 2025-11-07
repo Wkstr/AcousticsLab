@@ -111,7 +111,7 @@ struct TaskSC final
                 LOG(INFO, "Estimated ADPCM size: %zu, OPUS size: %zu", adpcm_size, opus_size);
 
                 _adpcm_encoder = core::EncoderADPCMIMA::create(nullptr, adpcm_size);
-                _opus_encoder = core::EncoderLIBOPUS::create(nullptr, opus_size);
+                _opus_encoder = core::EncoderLIBOPUS::create(nullptr, opus_size, _sr);
 
                 auto base64_size = core::EncoderASCIIBase64::estimate(std::max(adpcm_size, opus_size));
                 LOG(INFO, "Estimated Base64 size: %zu", base64_size);
@@ -215,11 +215,11 @@ struct TaskSC final
                 }
             }
 
-            status = replyWithStatus(status, df_ts, encoder_writer);
-            if (!status) [[unlikely]]
-            {
-                return status;
-            }
+            // status = replyWithStatus(status, df_ts, encoder_writer);
+            // if (!status) [[unlikely]]
+            // {
+            //     return status;
+            // }
 
             return executor.submit(getptr(), getNextDataDelay(_sensor->dataAvailable()));
         }
@@ -354,7 +354,8 @@ struct TaskSC final
             : api::Task(context, transport, id, v1::defaults::task_priority), _dag(std::move(dag)),
               _tag(std::move(tag)), _external_task_id(external_task_id), _internal_task_id(_external_task_id),
               _start_time(std::chrono::steady_clock::now()), _rms_normalize(shared::rms_normalize.load()),
-              _current_id(0), _current_id_next(0)
+              _current_id(0), _current_id_next(0), _source_rate(44100), _needs_resampling(false),
+              _resample_buffer(nullptr), _resample_buffer_size(0)
         {
             {
                 auto device = hal::DeviceRegistry::getDevice();
@@ -399,6 +400,37 @@ struct TaskSC final
                     return;
                 _output = p_out_tsr;
             }
+            {
+                auto sensor = hal::SensorRegistry::getSensor(2);
+                if (sensor)
+                {
+                    auto it = sensor->info().configs.find("sr");
+                    if (it != sensor->info().configs.end())
+                    {
+                        _source_rate = it->second.getValue<int>();
+                        if (_source_rate != 44100)
+                        {
+                            _needs_resampling = true;
+                            const auto &inp_shape = _input->shape();
+                            if (inp_shape.size() >= 1)
+                            {
+                                const size_t target_samples = inp_shape[0];
+                                _resample_buffer_size = static_cast<size_t>(
+                                    std::ceil(target_samples * static_cast<float>(_source_rate) / 44100.f));
+                                _resample_buffer = std::make_unique<int16_t[]>(_resample_buffer_size);
+                                _resampler = core::ResampleLinear1D<int16_t>();
+                                LOG(INFO,
+                                    "Resampling enabled: source_rate=%d Hz, target_rate=44100 Hz, buffer_size=%zu",
+                                    _source_rate, _resample_buffer_size);
+                            }
+                        }
+                        else
+                        {
+                            LOG(INFO, "Resampling disabled: sensor sample rate is 44.1kHz");
+                        }
+                    }
+                }
+            }
         }
 
         ~Invoke() noexcept override
@@ -432,23 +464,57 @@ struct TaskSC final
             }
 
             const size_t required = inp_shape[0];
-            const size_t to_discard = static_cast<size_t>(std::round(required * (1.f - shared::overlap_ratio.load())));
             size_t available = 0;
+            if (_needs_resampling) [[unlikely]]
             {
-                const std::lock_guard<std::mutex> lock(shared::buffer_mutex);
-                const auto head = shared::buffer_head;
-                const auto tail = shared::buffer_tail;
-                available = head - tail;
-                if (available < required) [[unlikely]]
+                const size_t source_samples_needed
+                    = static_cast<size_t>(std::ceil(required * static_cast<float>(_source_rate) / 44100.f));
+                const size_t to_discard_source = static_cast<size_t>(std::round(
+                    required * (1.f - shared::overlap_ratio.load()) * (static_cast<float>(_source_rate) / 44100.f)));
                 {
-                    return executor.submit(getptr(), shared::invoke_pull_ms);
+                    const std::lock_guard<std::mutex> lock(shared::buffer_mutex);
+                    const auto head = shared::buffer_head;
+                    const auto tail = shared::buffer_tail;
+                    available = head - tail;
+                    if (available < source_samples_needed) [[unlikely]]
+                    {
+                        return executor.submit(getptr(), shared::invoke_pull_ms);
+                    }
+                    for (size_t i = 0; i < source_samples_needed; ++i)
+                    {
+                        _resample_buffer[i] = shared::buffer[(tail + i) & shared::buffer_size_mask];
+                    }
+                    shared::buffer_tail = tail + std::min(to_discard_source, available);
                 }
-                for (size_t i = 0; i < required; ++i)
+                bool resample_result = _resampler(_resample_buffer.get(), source_samples_needed,
+                    _input->data<int16_t>(), required, _source_rate, 44100);
+                if (!resample_result)
                 {
-                    _input->data<int16_t>()[i] = shared::buffer[(tail + i) & shared::buffer_size_mask];
+                    LOG(ERROR, "Resampling failed");
+                    return replyWithStatus(STATUS(EIO, "Resampling failed"));
                 }
-                shared::buffer_tail = tail + std::min(to_discard, available);
             }
+            else
+            {
+                const size_t to_discard
+                    = static_cast<size_t>(std::round(required * (1.f - shared::overlap_ratio.load())));
+                {
+                    const std::lock_guard<std::mutex> lock(shared::buffer_mutex);
+                    const auto head = shared::buffer_head;
+                    const auto tail = shared::buffer_tail;
+                    available = head - tail;
+                    if (available < required) [[unlikely]]
+                    {
+                        return executor.submit(getptr(), shared::invoke_pull_ms);
+                    }
+                    for (size_t i = 0; i < required; ++i)
+                    {
+                        _input->data<int16_t>()[i] = shared::buffer[(tail + i) & shared::buffer_size_mask];
+                    }
+                    shared::buffer_tail = tail + std::min(to_discard, available);
+                }
+            }
+
             _current_id_next = _current_id + 1;
 
             const auto s = std::chrono::steady_clock::now();
@@ -544,6 +610,12 @@ struct TaskSC final
         core::Tensor *_output = nullptr;
 
         size_t _perf_ms = 0;
+
+        int _source_rate;
+        bool _needs_resampling;
+        std::unique_ptr<int16_t[]> _resample_buffer;
+        size_t _resample_buffer_size;
+        core::ResampleLinear1D<int16_t> _resampler;
     };
 };
 

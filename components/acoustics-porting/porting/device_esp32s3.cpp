@@ -59,11 +59,13 @@ static size_t getFreeMemorySize() noexcept
 static constexpr const char DEVICE_MODEL[] = "ESP32-S3";
 static constexpr const char DEVICE_VERSION[] = "1.0.0";
 #if defined(PORTING_BOARD_MODEL_RESPEAKER_LITE) && PORTING_BOARD_MODEL_RESPEAKER_LITE
-static constexpr const char DEVICE_NAME[] = "ReSpeaker Lite (XIAO ESP32S3)";
+static constexpr const char DEVICE_NAME[] = "ReSpeaker Lite";
+#elif defined(PORTING_BOARD_MODEL_RESPEAKER_XVF3800) && PORTING_BOARD_MODEL_RESPEAKER_XVF3800
+static constexpr const char DEVICE_NAME[] = "ReSpeaker XVF3800";
 #elif defined(PORTING_BOARD_MODEL_XIAO_S3) && PORTING_BOARD_MODEL_XIAO_S3
 static constexpr const char DEVICE_NAME[] = "XIAO ESP32-S3";
 #else
-static constexpr const char DEVICE_NAME[] = "XIAO ESP32-S3";
+static constexpr const char DEVICE_NAME[] = "Unknown";
 #endif
 static constexpr const size_t DEVICE_MEMORY_SIZE = 8 * 1024 * 1024;
 static constexpr const size_t DEVICE_NAME_LENGTH_MAX = 64;
@@ -71,7 +73,7 @@ static constexpr const size_t DEVICE_NAME_LENGTH_MAX = 64;
 static constexpr const char DEFAULT_DEVICE_NAME_PATH[] = ".device_name";
 static constexpr const char DEFAULT_BOOT_COUNT_PATH[] = ".boot_count";
 
-static constexpr const int GPIO_PINS[] = { 1, 2, 3, 21, 41, 42 };
+static constexpr const int GPIO_PINS[] = { 1, 2, 3, 21, 41, 42, 43, 44 };
 
 class DeviceESP32S3 final: public hal::Device
 {
@@ -86,8 +88,8 @@ public:
 
         for (auto pin: GPIO_PINS)
         {
-            gpio_set_direction(static_cast<gpio_num_t>(pin), GPIO_MODE_OUTPUT);
-            gpio_set_pull_mode(static_cast<gpio_num_t>(pin), GPIO_FLOATING);
+            // gpio_set_direction(static_cast<gpio_num_t>(pin), GPIO_MODE_OUTPUT);
+            // gpio_set_pull_mode(static_cast<gpio_num_t>(pin), GPIO_FLOATING);
         }
     }
 
