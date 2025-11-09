@@ -30,6 +30,6 @@
 #define BOARD_DMA_FRAME_COUNT 800
 
 // GPIO Pins for device control
-#define BOARD_GPIO_PINS { 1, 2, 3, 7, 8, 21, 43, 44 }
+#define BOARD_GPIO_PINS { 1, 2, 3, 21, 41, 42 }
 
 #endif // BOARD_RESPEAKER_LITE_H

@@ -30,8 +30,6 @@
 #define BOARD_DMA_FRAME_COUNT 800
 
 // GPIO Pins for device control
-#define BOARD_GPIO_PINS                                                                                                \
-    {                                                                                                                  \
-    }
+#define BOARD_GPIO_PINS { 1, 3, 4, 43, 44 }
 
 #endif // BOARD_RESPEAKER_XVF3800_H
