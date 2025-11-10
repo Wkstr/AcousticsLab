@@ -355,7 +355,7 @@ struct TaskSC final
             : api::Task(context, transport, id, v1::defaults::task_priority), _dag(std::move(dag)),
               _tag(std::move(tag)), _external_task_id(external_task_id), _internal_task_id(_external_task_id),
               _start_time(std::chrono::steady_clock::now()), _rms_normalize(shared::rms_normalize.load()),
-              _current_id(0), _current_id_next(0), _source_rate(44100), _needs_resampling(false),
+              _current_id(0), _current_id_next(0), _source_rate(MODEL_TARGET_SR), _needs_resampling(false),
               _resample_buffer(nullptr), _resample_buffer_size(0)
         {
             {
@@ -403,7 +403,7 @@ struct TaskSC final
             }
             {
                 _source_rate = BOARD_RAW_SAMPLE_RATE;
-                if (_source_rate != 44100)
+                if (_source_rate != MODEL_TARGET_SR)
                 {
                     _needs_resampling = true;
                     const auto &inp_shape = _input->shape();
@@ -411,11 +411,11 @@ struct TaskSC final
                     {
                         const size_t target_samples = inp_shape[0];
                         _resample_buffer_size = static_cast<size_t>(
-                            std::ceil(target_samples * static_cast<float>(_source_rate) / 44100.f));
+                            std::ceil(target_samples * static_cast<float>(_source_rate) / MODEL_TARGET_SR));
                         _resample_buffer = std::make_unique<int16_t[]>(_resample_buffer_size);
                         _resampler = core::ResampleLinear1D<int16_t>();
-                        LOG(INFO, "Resampling enabled: source_rate=%d Hz, target_rate=44100 Hz, buffer_size=%zu",
-                            _source_rate, _resample_buffer_size);
+                        LOG(INFO, "Resampling enabled: source_rate=%d Hz, target_rate=%d Hz, buffer_size=%zu",
+                            _source_rate, MODEL_TARGET_SR, _resample_buffer_size);
                     }
                 }
                 else
@@ -460,9 +460,10 @@ struct TaskSC final
             if (_needs_resampling) [[unlikely]]
             {
                 const size_t source_samples_needed
-                    = static_cast<size_t>(std::ceil(required * static_cast<float>(_source_rate) / 44100.f));
-                const size_t to_discard_source = static_cast<size_t>(std::round(
-                    required * (1.f - shared::overlap_ratio.load()) * (static_cast<float>(_source_rate) / 44100.f)));
+                    = static_cast<size_t>(std::ceil(required * static_cast<float>(_source_rate) / MODEL_TARGET_SR));
+                const size_t to_discard_source
+                    = static_cast<size_t>(std::round(required * (1.f - shared::overlap_ratio.load())
+                                                     * (static_cast<float>(_source_rate) / MODEL_TARGET_SR)));
                 {
                     const std::lock_guard<std::mutex> lock(shared::buffer_mutex);
                     const auto head = shared::buffer_head;
@@ -479,7 +480,7 @@ struct TaskSC final
                     shared::buffer_tail = tail + std::min(to_discard_source, available);
                 }
                 bool resample_result = _resampler(_resample_buffer.get(), source_samples_needed,
-                    _input->data<int16_t>(), required, _source_rate, 44100);
+                    _input->data<int16_t>(), required, _source_rate, MODEL_TARGET_SR);
                 if (!resample_result)
                 {
                     LOG(ERROR, "Resampling failed");
@@ -602,6 +603,7 @@ struct TaskSC final
         core::Tensor *_output = nullptr;
 
         size_t _perf_ms = 0;
+        static constexpr int MODEL_TARGET_SR = 44100;
 
         int _source_rate;
         bool _needs_resampling;
