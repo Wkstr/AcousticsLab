@@ -514,6 +514,8 @@ struct TaskSC final
                 }
             }
 
+            _current_id_next = _current_id + 1;
+
             const auto s = std::chrono::steady_clock::now();
             auto status = _dag->operator()();
             const auto e = std::chrono::steady_clock::now();
