@@ -62,6 +62,9 @@ namespace shared {
     inline constexpr const float threshold_min = 0.f;
     inline constexpr const float threshold_max = 1.f;
     inline std::atomic<float> threshold = 0.0f;
+    inline constexpr const float threshold_min = 0.f;
+    inline constexpr const float threshold_max = 1.f;
+    inline std::atomic<float> threshold = 0.0f;
 } // namespace shared
 
 struct TaskSC final
@@ -511,8 +514,6 @@ struct TaskSC final
                 }
             }
 
-            _current_id_next = _current_id + 1;
-
             const auto s = std::chrono::steady_clock::now();
             auto status = _dag->operator()();
             const auto e = std::chrono::steady_clock::now();
@@ -534,6 +535,28 @@ struct TaskSC final
     private:
         core::Status replyWithStatus(core::Status status) noexcept
         {
+            if (status && _output) [[likely]]
+            {
+                const int size = _output->shape().size() ? _output->shape()[0] : 0;
+                const auto classes = _output->data<core::class_t>();
+                const float threshold = shared::threshold.load();
+
+                bool has_above_threshold = false;
+                for (int i = 0; i < size; ++i)
+                {
+                    if (classes[i].confidence >= threshold)
+                    {
+                        has_above_threshold = true;
+                        break;
+                    }
+                }
+
+                if (!has_above_threshold)
+                {
+                    return status;
+                }
+            }
+
             auto writer = v1::defaults::serializer->writer(v1::defaults::wait_callback,
                 std::bind(&v1::defaults::write_callback, std::ref(_transport), std::placeholders::_1,
                     std::placeholders::_2),
