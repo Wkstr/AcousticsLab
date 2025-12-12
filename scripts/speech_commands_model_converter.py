@@ -176,7 +176,8 @@ def _make_representative_dataset_generator(
                     start = (len(data) - target_len) // 2
                     data = data[start : start + target_len]
                 else:
-                    data = np.pad(data, (0, target_len - len(data)), "constant")
+                    tile_count = int(np.ceil(target_len / len(data)))
+                    data = np.tile(data, tile_count)[:target_len]
 
                 result = inference_func(
                     tf.constant(data.reshape(1, target_len), dtype=tf.float32)
