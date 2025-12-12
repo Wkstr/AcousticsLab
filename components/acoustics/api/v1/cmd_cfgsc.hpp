@@ -25,7 +25,6 @@ class CmdCfgSC final: public api::Command
     static inline constexpr const char *overlap_ratio_path = CONTEXT_PREFIX CONTEXT_VERSION "/overlap_ratio";
     static inline constexpr const char *rms_normalize_path = CONTEXT_PREFIX CONTEXT_VERSION "/rms_normalize";
     static inline constexpr const char *threshold_path = CONTEXT_PREFIX CONTEXT_VERSION "/threshold";
-    static inline constexpr const char *threshold_path = CONTEXT_PREFIX CONTEXT_VERSION "/threshold";
 
 public:
     static inline void preInitHook()
@@ -78,146 +77,135 @@ public:
                   CONFIG_OBJECT_DECL_FLOAT("threshold", "Confidence threshold for sound classification",
                       v1::shared::threshold.load(), shared::threshold_min, shared::threshold_max),
               }),
-                      v1::shared::rms_normalize.load()),
-                  CONFIG_OBJECT_DECL_FLOAT("threshold", "Confidence threshold for sound classification",
-                      v1::shared::threshold.load(), shared::threshold_min, shared::threshold_max),
-              }),
           _device(hal::DeviceRegistry::getDevice())
     {
     }
 
-              ~CmdCfgSC() noexcept override = default;
+    ~CmdCfgSC() noexcept override = default;
 
-              std::shared_ptr<api::Task> operator()(api::Context &context, hal::Transport &transport,
-                  const core::ConfigMap &args, size_t id) override
-              {
-                  auto status = STATUS_OK();
+    std::shared_ptr<api::Task> operator()(api::Context &context, hal::Transport &transport, const core::ConfigMap &args,
+        size_t id) override
+    {
+        auto status = STATUS_OK();
 
-                  if (auto it = args.find("@0"); it != args.end())
-                  {
-                      if (auto overlap_ratio_str = std::get_if<std::string>(&it->second);
-                          overlap_ratio_str != nullptr && !overlap_ratio_str->empty())
-                      {
-                          auto &target = _args["overlap_ratio"];
-                          if ((status = target.setValue(*overlap_ratio_str)))
-                          {
-                              const auto old = shared::overlap_ratio.load();
-                              float overlap_ratio = target.getValue<float>();
-                              if (old != overlap_ratio && _device
-                                  && !(status = _device->store(hal::Device::StorageType::Internal, overlap_ratio_path,
-                                           &overlap_ratio, sizeof(overlap_ratio))))
-                              {
-                                  goto Reply;
-                              }
-                              v1::shared::overlap_ratio = overlap_ratio;
-                          }
-                          else
-                              goto Reply;
-                      }
-                  }
+        if (auto it = args.find("@0"); it != args.end())
+        {
+            if (auto overlap_ratio_str = std::get_if<std::string>(&it->second);
+                overlap_ratio_str != nullptr && !overlap_ratio_str->empty())
+            {
+                auto &target = _args["overlap_ratio"];
+                if ((status = target.setValue(*overlap_ratio_str)))
+                {
+                    const auto old = shared::overlap_ratio.load();
+                    float overlap_ratio = target.getValue<float>();
+                    if (old != overlap_ratio && _device
+                        && !(status = _device->store(hal::Device::StorageType::Internal, overlap_ratio_path,
+                                 &overlap_ratio, sizeof(overlap_ratio))))
+                    {
+                        goto Reply;
+                    }
+                    v1::shared::overlap_ratio = overlap_ratio;
+                }
+                else
+                    goto Reply;
+            }
+        }
 
-                  if (auto it = args.find("@1"); it != args.end())
-                  {
-                      if (auto rms_normalize_str = std::get_if<std::string>(&it->second);
-                          rms_normalize_str != nullptr && !rms_normalize_str->empty())
-                      {
-                          auto &target = _args["rms_normalize"];
-                          if ((status = target.setValue(*rms_normalize_str)))
-                          {
-                              const auto old = shared::rms_normalize.load();
-                              bool rms_normalize = target.getValue<bool>();
-                              if (old != rms_normalize && _device
-                                  && !(status = _device->store(hal::Device::StorageType::Internal, rms_normalize_path,
-                                           &rms_normalize, sizeof(rms_normalize))))
-                              {
-                                  goto Reply;
-                              }
-                              v1::shared::rms_normalize = rms_normalize;
-                          }
-                          else
-                              goto Reply;
-                      }
-                  }
+        if (auto it = args.find("@1"); it != args.end())
+        {
+            if (auto rms_normalize_str = std::get_if<std::string>(&it->second);
+                rms_normalize_str != nullptr && !rms_normalize_str->empty())
+            {
+                auto &target = _args["rms_normalize"];
+                if ((status = target.setValue(*rms_normalize_str)))
+                {
+                    const auto old = shared::rms_normalize.load();
+                    bool rms_normalize = target.getValue<bool>();
+                    if (old != rms_normalize && _device
+                        && !(status = _device->store(hal::Device::StorageType::Internal, rms_normalize_path,
+                                 &rms_normalize, sizeof(rms_normalize))))
+                    {
+                        goto Reply;
+                    }
+                    v1::shared::rms_normalize = rms_normalize;
+                }
+                else
+                    goto Reply;
+            }
+        }
 
-                  if (auto it = args.find("@2"); it != args.end())
-                  {
-                      if (auto threshold_str = std::get_if<std::string>(&it->second);
-                          threshold_str != nullptr && !threshold_str->empty())
-                      {
-                          auto &target = _args["threshold"];
-                          if ((status = target.setValue(*threshold_str)))
-                          {
-                              const auto old = shared::threshold.load();
-                              float threshold = target.getValue<float>();
-                              if (old != threshold && _device
-                                  && !(status = _device->store(hal::Device::StorageType::Internal, threshold_path,
-                                           &threshold, sizeof(threshold))))
-                              {
-                                  goto Reply;
-                              }
-                              v1::shared::threshold = threshold;
-                          }
-                          else
-                              goto Reply;
-                      }
-                  }
+        if (auto it = args.find("@2"); it != args.end())
+        {
+            if (auto threshold_str = std::get_if<std::string>(&it->second);
+                threshold_str != nullptr && !threshold_str->empty())
+            {
+                auto &target = _args["threshold"];
+                if ((status = target.setValue(*threshold_str)))
+                {
+                    const auto old = shared::threshold.load();
+                    float threshold = target.getValue<float>();
+                    if (old != threshold && _device
+                        && !(status = _device->store(hal::Device::StorageType::Internal, threshold_path, &threshold,
+                                 sizeof(threshold))))
+                    {
+                        goto Reply;
+                    }
+                    v1::shared::threshold = threshold;
+                }
+                else
+                    goto Reply;
+            }
+        }
 
-              Reply: {
-                  auto writer = v1::defaults::serializer->writer(v1::defaults::wait_callback,
-                      std::bind(&v1::defaults::write_callback, std::ref(transport), std::placeholders::_1,
-                          std::placeholders::_2),
-                      std::bind(&v1::defaults::flush_callback, std::ref(transport)));
+    Reply: {
+        auto writer = v1::defaults::serializer->writer(v1::defaults::wait_callback,
+            std::bind(&v1::defaults::write_callback, std::ref(transport), std::placeholders::_1, std::placeholders::_2),
+            std::bind(&v1::defaults::flush_callback, std::ref(transport)));
 
-                  writer["type"] += v1::ResponseType::Direct;
-                  writer["name"] += _name;
-                  if (auto it = args.find("@cmd_tag"); it != args.end())
-                  {
-                      auto tag = std::get_if<std::string>(&it->second);
-                      if (tag != nullptr)
-                          writer["tag"] << *tag;
-                  }
-                  writer["code"] += status.code();
-                  writer["msg"] << status.message();
-                  {
-                      auto data = writer["data"].writer<core::ObjectWriter>();
-                      {
-                          auto args = data["args"].writer<core::ArrayWriter>();
-                          {
-                              auto arg = args.writer<core::ArrayWriter>();
-                              arg += shared::overlap_ratio.load();
-                              arg += shared::overlap_ratio_min;
-                              arg += shared::overlap_ratio_max;
-                          }
-                          {
-                              auto arg = args.writer<core::ArrayWriter>();
-                              arg += shared::rms_normalize.load();
-                              arg += 0;
-                              arg += 1;
-                          }
-                          {
-                              auto arg = args.writer<core::ArrayWriter>();
-                              arg += shared::threshold.load();
-                              arg += shared::threshold_min;
-                              arg += shared::threshold_max;
-                          }
-                          {
-                              auto arg = args.writer<core::ArrayWriter>();
-                              arg += shared::threshold.load();
-                              arg += shared::threshold_min;
-                              arg += shared::threshold_max;
-                          }
-                      }
-                      data["sampleChunkMs"] += shared::sample_chunk_ms;
-                  }
-              }
+        writer["type"] += v1::ResponseType::Direct;
+        writer["name"] += _name;
+        if (auto it = args.find("@cmd_tag"); it != args.end())
+        {
+            auto tag = std::get_if<std::string>(&it->second);
+            if (tag != nullptr)
+                writer["tag"] << *tag;
+        }
+        writer["code"] += status.code();
+        writer["msg"] << status.message();
+        {
+            auto data = writer["data"].writer<core::ObjectWriter>();
+            {
+                auto args = data["args"].writer<core::ArrayWriter>();
+                {
+                    auto arg = args.writer<core::ArrayWriter>();
+                    arg += shared::overlap_ratio.load();
+                    arg += shared::overlap_ratio_min;
+                    arg += shared::overlap_ratio_max;
+                }
+                {
+                    auto arg = args.writer<core::ArrayWriter>();
+                    arg += shared::rms_normalize.load();
+                    arg += 0;
+                    arg += 1;
+                }
+                {
+                    auto arg = args.writer<core::ArrayWriter>();
+                    arg += shared::threshold.load();
+                    arg += shared::threshold_min;
+                    arg += shared::threshold_max;
+                }
+            }
+            data["sampleChunkMs"] += shared::sample_chunk_ms;
+        }
+    }
 
-                  return nullptr;
-              }
+        return nullptr;
+    }
 
-          private:
-              hal::Device *_device;
-              };
+private:
+    hal::Device *_device;
+};
 
-              } // namespace v1
+} // namespace v1
 
 #endif // CMD_CFGSC_HPP
